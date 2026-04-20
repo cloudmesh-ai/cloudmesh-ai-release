@@ -4,6 +4,26 @@ Cloudmesh AI Release is an automation extension for the `cmc` (Cloudmesh Command
 
 By enforcing pre-flight checks, managing state, and providing a "safety net" via baseline commits and rollback capabilities, it ensures that every release is consistent, documented, and reversible.
 
+## Quickstart
+
+For a standard release of a package (e.g., `cloudmesh-ai-cmc`), you have two options:
+
+### Option 1: The Wizard (Recommended)
+Run the interactive wizard that guides you through all steps:
+``` bash
+cmc release now cloudmesh-ai-cmc
+```
+
+### Option 2: Granular Control
+Execute each phase manually:
+``` bash
+cmc release validate cloudmesh-ai-cmc
+cmc release baseline cloudmesh-ai-cmc
+cmc release testpypi cloudmesh-ai-cmc
+cmc release pypi cloudmesh-ai-cmc
+cmc release check cloudmesh-ai-cmc
+```
+
 ------------------------------------------------------------------------
 
 ## Usage
@@ -11,6 +31,11 @@ By enforcing pre-flight checks, managing state, and providing a "safety net" via
 ``` text
 Usage:
   cmc release now [options] <packagename>
+  cmc release validate <packagename>
+  cmc release baseline [options] <packagename>
+  cmc release testpypi [options] <packagename>
+  cmc release pypi [options] <packagename>
+  cmc release check <packagename>
   cmc release rollback [options] <packagename>
   cmc release (-h | --help)
 
