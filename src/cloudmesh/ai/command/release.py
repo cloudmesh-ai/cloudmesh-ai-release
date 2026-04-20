@@ -287,7 +287,7 @@ class ReleaseManager:
                 semver_tags.append(t[1:]) # Remove 'v'
 
         if not semver_tags:
-            return "0.1.0.dev1"
+            return None
 
         # Sort tags to find the latest (simple sort works for most semver)
         # For a more robust solution, we'd use packaging.version
@@ -545,6 +545,11 @@ def testpypi_cmd(packagename, dry_run, version):
     try:
         # Determine the dev version for TestPyPI
         test_v = version or manager.get_next_dev_version()
+        
+        if not test_v:
+            console.print("[yellow]No git tags found to determine the next dev version.[/yellow]")
+            test_v = click.prompt("Please enter the next dev version (e.g., 0.1.1.dev1)")
+            
         manager.init_logging(test_v)
         
         # Create the dev tag before uploading
@@ -658,6 +663,11 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
             test_v = version or manager.get_next_dev_version()
+            
+            if not test_v:
+                console.print("[yellow]No git tags found to determine the next dev version.[/yellow]")
+                test_v = click.prompt("Please enter the next dev version (e.g., 0.1.1.dev1)")
+
             if click.confirm(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?"):
                 manager.create_tag(test_v)
                 manager.build_package()
