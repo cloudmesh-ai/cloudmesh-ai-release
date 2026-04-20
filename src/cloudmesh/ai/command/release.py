@@ -219,7 +219,11 @@ class ReleaseManager:
         """Ensures the git working directory is clean."""
         result = self.run_command(["git", "status", "--porcelain"])
         if result.stdout.strip():
-            raise RuntimeError("Git working directory is not clean. Please commit or stash changes.")
+            status_result = self.run_command(["git", "status"])
+            status_output = status_result.stdout
+            raise RuntimeError(
+                f"Git working directory is not clean. Please commit or stash changes.\n\n{status_output}"
+            )
         self._log("Git working directory is clean.", "INFO")
 
     def get_current_version(self) -> str:
