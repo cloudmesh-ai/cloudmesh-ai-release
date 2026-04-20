@@ -27,6 +27,9 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 # Initialize Rich console
 console = Console()
 
+class ReleaseGroup(click.Group):
+    sort_commands = False
+
 class ReleaseManager:
     """Manages the state and execution of a package release process."""
 
@@ -301,7 +304,7 @@ class ReleaseManager:
         self.state_file.unlink()
         self._log("Rollback complete. Local environment restored.", "INFO")
 
-@click.group(sort_commands=False)
+@ReleaseGroup()
 def release_group():
     """
     Release automation tool for Cloudmesh AI packages.
