@@ -43,6 +43,42 @@ class ReleaseGroup(click.Group):
             "rollback",
         ]
 
+class ReleaseConfig:
+    """Manages the release configuration file .release_config.json."""
+    
+    def __init__(self, config_path: str = ".release_config.json"):
+        self.config_path = Path(config_path)
+        self.data = self._load()
+
+    def _load(self) -> Dict[str, Any]:
+        if self.config_path.exists():
+            try:
+                return json.loads(self.config_path.read_text())
+            except json.JSONDecodeError:
+                return {"packages": [], "ignored": []}
+        return {"packages": [], "ignored": []}
+
+    def save(self):
+        with open(self.config_path, "w") as f:
+            json.dump(self.data, f, indent=4)
+
+    def add_package(self, package: str):
+        if package not in self.data["packages"]:
+            self.data["packages"].append(package)
+            if package in self.data["ignored"]:
+                self.data["ignored"].remove(package)
+            self.save()
+
+    def ignore_package(self, package: str):
+        if package in self.data["packages"]:
+            self.data["packages"].remove(package)
+        if package not in self.data["ignored"]:
+            self.data["ignored"].append(package)
+        self.save()
+
+    def get_packages(self) -> List[str]:
+        return self.data.get("packages", [])
+
 class ReleaseManager:
     """Manages the state and execution of a package release process."""
 
@@ -111,7 +147,7 @@ class ReleaseManager:
             with open(self.log_file, "a") as f:
                 f.write(formatted_msg + "\n")
 
-    def run_command(self, cmd: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    def run_command(self, cmd: List[str], cwd: Optional[Path] = None, stream: bool = False) -> subprocess.CompletedProcess:
         """Executes a shell command, handles dry-run, and logs output."""
         cwd = cwd or self.package_dir
         cmd_str = " ".join(cmd)
@@ -122,13 +158,34 @@ class ReleaseManager:
 
         self._log(f"Executing: {cmd_str}", "DEBUG")
         try:
-            result = subprocess.run(
-                cmd, 
-                cwd=cwd, 
-                capture_output=True, 
-                text=True, 
-                check=True
-            )
+            if stream:
+                # Use Popen to stream output in real-time
+                process = subprocess.Popen(
+                    cmd, 
+                    cwd=cwd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, 
+                    text=True
+                )
+                stdout_acc = []
+                for line in process.stdout:
+                    console.print(f"  [dim]{line.strip()}[/dim]")
+                    stdout_acc.append(line)
+                
+                process.wait()
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(process.returncode, cmd, "".join(stdout_acc))
+                
+                result = subprocess.CompletedProcess(cmd, 0, stdout="".join(stdout_acc), stderr="")
+            else:
+                result = subprocess.run(
+                    cmd, 
+                    cwd=cwd, 
+                    capture_output=True, 
+                    text=True, 
+                    check=True
+                )
+            
             if result.stdout and self.log_file:
                 with open(self.log_file, "a") as f:
                     f.write(f"STDOUT:\n{result.stdout}\n")
@@ -209,10 +266,17 @@ class ReleaseManager:
 
     def check_dependencies(self):
         """Verifies that required CLI tools are installed."""
-        deps = ["git", "twine", "python3"]
+        deps = ["git", "twine", "python"]
         for dep in deps:
             if shutil.which(dep) is None:
                 raise RuntimeError(f"Required dependency '{dep}' not found in PATH.")
+        
+        # Check if 'build' module is installed
+        try:
+            self.run_command(["python", "-m", "build", "--help"])
+        except Exception:
+            raise RuntimeError("The 'build' module is not installed. Please run 'pip install build'.")
+            
         self._log("All dependencies verified.", "INFO")
 
     def check_git_clean(self):
@@ -225,6 +289,15 @@ class ReleaseManager:
                 f"Git working directory is not clean. Please commit or stash changes.\n\n{status_output}"
             )
         self._log("Git working directory is clean.", "INFO")
+
+    def check_tag_exists(self, version: str):
+        """Checks if a git tag already exists for the given version."""
+        tag = f"v{version}"
+        try:
+            self.run_command(["git", "rev-parse", tag])
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     def get_current_version(self) -> str:
         """Reads the version from the VERSION file."""
@@ -255,19 +328,12 @@ class ReleaseManager:
     def build_package(self):
         """Builds the package using the build module."""
         self._log("Building package artifacts...", "INFO")
-        self.run_command([sys.executable, "-m", "build"])
+        self.run_command([sys.executable, "-m", "build"], stream=True)
 
     def upload_to_pypi(self, repository: str = "pypi"):
         """Uploads the package to PyPI or TestPyPI."""
         self._log(f"Uploading to {repository}...", "INFO")
-        cmd = ["twine", "upload"]
-        if repository == "testpypi":
-            cmd.append("--repository")
-            cmd.append("testpypi")
-        cmd.extend([str(self.package_dir / "dist" / "*")])
         
-        # Twine doesn't like wildcards in list form, we use shell=True or expand manually
-        # For safety, we'll find the files
         dist_dir = self.package_dir / "dist"
         files = [str(f) for f in dist_dir.glob("*") if f.suffix in (".whl", ".gz")]
         
@@ -276,16 +342,34 @@ class ReleaseManager:
             final_cmd.extend(["--repository", "testpypi"])
         final_cmd.extend(files)
         
-        self.run_command(final_cmd)
+        self.run_command(final_cmd, stream=True)
 
     def create_tag(self, version: str):
         """Creates and pushes a git tag."""
+        if self.check_tag_exists(version):
+            raise RuntimeError(f"Git tag v{version} already exists. Please check the version or delete the tag.")
+            
         tag = f"v{version}"
         self._log(f"Creating git tag {tag}...", "INFO")
         self.run_command(["git", "tag", "-a", tag, "-m", f"Release {version}"])
         self.run_command(["git", "push", "origin", "main", "--tags"])
         self.state["created_tag"] = tag
         self.save_state()
+
+    def get_changelog(self) -> str:
+        """Generates a summary of commits since the last tag."""
+        try:
+            # Get the last tag
+            last_tag_res = self.run_command(["git", "describe", "--tags", "--abbrev=0"])
+            last_tag = last_tag_res.stdout.strip()
+            range_str = f"{last_tag}..HEAD"
+        except Exception:
+            # No tags found, get all commits
+            range_str = "HEAD"
+
+        self._log(f"Generating changelog for {range_str}...", "DEBUG")
+        result = self.run_command(["git", "log", range_str, "--oneline", "--no-merges"])
+        return result.stdout.strip() or "No new commits found."
 
     def rollback(self):
         """Rolls back the local environment to the baseline state."""
@@ -330,6 +414,13 @@ def release_group():
       1. validate -> 2. baseline -> 3. testpypi -> 4. pypi -> 5. check
     """
     pass
+
+@click.group(name="plan")
+def plan_group():
+    """Manage the release plan and execute bulk releases."""
+    pass
+
+release_group.add_command(plan_group)
 
 @release_group.command(name="validate")
 @click.argument("packagename")
@@ -471,15 +562,8 @@ def version_cmd(action, packagename):
         except Exception as e:
             console.print(f"[red]Error calculating versions: {e}[/red]")
 
-@release_group.command(name="now")
-@click.argument("packagename")
-@click.option("--dry-run", is_flag=True, help="Simulate the release process without making changes.")
-@click.option("--version", type=str, help="Specify the target version for the release.")
-@click.option("--skip-testpypi", is_flag=True, help="Skip the TestPyPI validation phase.")
-def release_cmd(packagename, dry_run, version, skip_testpypi):
-    """
-    Execute the release wizard for a specified package.
-    """
+def run_release_wizard(packagename, dry_run, version, skip_testpypi):
+    """Core logic for the release wizard, reusable by 'now' and 'do'."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     
     try:
@@ -493,6 +577,10 @@ def release_cmd(packagename, dry_run, version, skip_testpypi):
         current_v = manager.get_current_version()
         log_v = version or current_v
         manager.init_logging(log_v)
+        
+        # Changelog
+        changelog = manager.get_changelog()
+        console.print(Panel(changelog, title="Suggested Changelog", border_style="blue"))
         
         # 2. Baseline
         if click.confirm("\nStep 1: Create baseline git commit?"):
@@ -514,7 +602,7 @@ def release_cmd(packagename, dry_run, version, skip_testpypi):
                 else:
                     if click.confirm("Verification failed. Rollback now?"):
                         manager.rollback()
-                        return
+                        return False
             else:
                 console.print("[yellow]Skipping TestPyPI phase.[/yellow]")
 
@@ -555,11 +643,91 @@ def release_cmd(packagename, dry_run, version, skip_testpypi):
         console.print("\n")
         console.print(table)
         console.print("\n")
+        return True
 
     except Exception as e:
         console.print(f"\n[bold red]Release failed:[/bold red] {e}")
         if not dry_run and click.confirm("Would you like to attempt a rollback?"):
             manager.rollback()
+        return False
+
+@release_group.command(name="now")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate the release process without making changes.")
+@click.option("--version", type=str, help="Specify the target version for the release.")
+@click.option("--skip-testpypi", is_flag=True, help="Skip the TestPyPI validation phase.")
+def release_cmd(packagename, dry_run, version, skip_testpypi):
+    """
+    Execute the release wizard for a specified package.
+    """
+    if not run_release_wizard(packagename, dry_run, version, skip_testpypi):
+        sys.exit(1)
+
+@plan_group.command(name="add")
+@click.argument("packagename")
+def plan_add(packagename):
+    """Add a package to the release plan."""
+    config = ReleaseConfig()
+    config.add_package(packagename)
+    console.print(f"[green]Added {packagename} to the release plan.[/green]")
+
+@plan_group.command(name="ignore")
+@click.argument("packagename")
+def plan_ignore(packagename):
+    """Remove a package from the release plan."""
+    config = ReleaseConfig()
+    config.ignore_package(packagename)
+    console.print(f"[yellow]Ignored {packagename} in the release plan.[/yellow]")
+
+@plan_group.command(name="list")
+def plan_list():
+    """Show packages configured for release."""
+    config = ReleaseConfig()
+    packages = config.get_packages()
+    if not packages:
+        console.print("[yellow]No packages configured for release. Use 'release plan add' to add some.[/yellow]")
+        return
+    
+    table = Table(title="Release Plan", box=box.ROUNDED)
+    table.add_column("Index", style="cyan")
+    table.add_column("Package Name", style="magenta")
+    for i, pkg in enumerate(packages, 1):
+        table.add_row(str(i), pkg)
+    console.print(table)
+
+@plan_group.command(name="do")
+@click.option("--dry-run", is_flag=True, help="Simulate the bulk release.")
+@click.option("--version", type=str, help="Specify a target version for all packages.")
+@click.option("--skip-testpypi", is_flag=True, help="Skip TestPyPI for all packages.")
+def plan_do(dry_run, version, skip_testpypi):
+    """Execute the release wizard for all configured packages."""
+    config = ReleaseConfig()
+    packages = config.get_packages()
+    if not packages:
+        console.print("[red]No packages configured. Use 'release plan add' first.[/red]")
+        return
+
+    console.print(Panel(f"Starting bulk release for {len(packages)} packages...", style="bold blue"))
+    
+    for pkg in packages:
+        console.print(Panel(f"Processing package: [bold magenta]{pkg}[/bold magenta]", style="cyan"))
+        success = run_release_wizard(pkg, dry_run, version, skip_testpypi)
+        if not success:
+            if click.confirm(f"Release failed for {pkg}. Continue with remaining packages?"):
+                continue
+            else:
+                sys.exit(1)
+    
+    console.print("\n[bold green]Bulk release process completed![/bold green]\n")
+
+@plan_group.command(name="now")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate the release process.")
+@click.option("--version", type=str, help="Specify the target version.")
+@click.option("--skip-testpypi", is_flag=True, help="Skip TestPyPI.")
+def plan_now(packagename, dry_run, version, skip_testpypi):
+    """Execute the release wizard for a specific package from the plan group."""
+    if not run_release_wizard(packagename, dry_run, version, skip_testpypi):
         sys.exit(1)
 
 @release_group.command(name="rollback")
