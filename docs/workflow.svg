@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400">
+  <!-- Background -->
+  <rect width="1200" height="400" fill="white" />
+  
+  <!-- Styles -->
+  <style>
+    .text { font-family: Arial, sans-serif; font-size: 14px; fill: black; text-anchor: middle; }
+    .cmd { font-family: "Courier New", monospace; font-size: 12px; fill: #444; text-anchor: middle; }
+    .box { stroke: #333; stroke-width: 1.5; }
+    .yellow { fill: #ffffcc; }
+    .blue { fill: #e6f3ff; }
+    .green { fill: #e6ffed; }
+    .white { fill: #ffffff; }
+    .arrow { stroke: black; stroke-width: 2; fill: none; }
+    .arrow-head { fill: black; }
+  </style>
+
+  <!-- Row 1 (Bottom, Left to Right) -->
+  <!-- Start -->
+  <rect x="50" y="250" width="160" height="60" rx="5" class="box white" />
+  <text x="130" y="275" class="text">Start Release</text>
+  <text x="130" y="295" class="cmd">cmc release now</text>
+  
+  <!-- Pre-flight -->
+  <rect x="260" y="250" width="160" height="60" rx="5" class="box white" />
+  <text x="340" y="275" class="text">Pre-flight Checks</text>
+  <text x="340" y="295" class="cmd">cmc release validate</text>
+  
+  <!-- Baseline -->
+  <rect x="470" y="250" width="160" height="60" rx="5" class="box white" />
+  <text x="550" y="275" class="text">Baseline Commit</text>
+  <text x="550" y="295" class="cmd">cmc release baseline</text>
+  
+  <!-- Build (Test) -->
+  <rect x="680" y="250" width="160" height="60" rx="5" class="box yellow" />
+  <text x="760" y="275" class="text">Build Package</text>
+  <text x="760" y="295" class="cmd">make build</text>
+  
+  <!-- Upload TestPyPI -->
+  <rect x="890" y="250" width="160" height="60" rx="5" class="box yellow" />
+  <text x="970" y="275" class="text">Upload to TestPyPI</text>
+  <text x="970" y="295" class="cmd">cmc release testpypi</text>
+  
+  <!-- Verify -->
+  <polygon points="1130,250 1200,280 1130,310 1060,280" class="box yellow" />
+  <text x="1130" y="275" class="text">Verify?</text>
+  <text x="1130" y="290" class="cmd">cmc release check</text>
+
+  <!-- Row 2 (Top, Right to Left) -->
+  <!-- Tag -->
+  <rect x="1010" y="80" width="160" height="60" rx="5" class="box blue" />
+  <text x="1090" y="105" class="text">Create Git Tag</text>
+  <text x="1090" y="125" class="cmd">git tag &amp; push</text>
+  
+  <!-- Build Final -->
+  <rect x="820" y="80" width="160" height="60" rx="5" class="box blue" />
+  <text x="900" y="105" class="text">Build Final</text>
+  <text x="900" y="125" class="cmd">make build</text>
+  
+  <!-- Upload PyPI -->
+  <rect x="630" y="80" width="160" height="60" rx="5" class="box blue" />
+  <text x="710" y="105" class="text">Upload to PyPI</text>
+  <text x="710" y="125" class="cmd">cmc release pypi</text>
+  
+  <!-- Final Validation -->
+  <rect x="440" y="80" width="160" height="60" rx="5" class="box blue" />
+  <text x="520" y="105" class="text">Final Validation</text>
+  <text x="520" y="125" class="cmd">pip install &amp; test</text>
+  
+  <!-- Complete -->
+  <rect x="250" y="80" width="160" height="60" rx="5" class="box green" />
+  <text x="330" y="105" class="text">Complete</text>
+  <text x="330" y="125" class="cmd">Done</text>
+
+  <!-- Arrows -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="arrow-head" />
+    </marker>
+  </defs>
+  
+  <!-- Row 1 Arrows (L to R) -->
+  <line x1="210" y1="280" x2="255" y2="280" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="420" y1="280" x2="465" y2="280" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="630" y1="280" x2="675" y2="280" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="840" y1="280" x2="885" y2="280" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="1050" y1="280" x2="1055" y2="280" class="arrow" marker-end="url(#arrowhead)" />
+  
+  <!-- Transition Row 1 to Row 2 (Bottom Right to Top Right) -->
+  <path d="M 1130 310 L 1130 200 L 1090 200 L 1090 140" class="arrow" marker-end="url(#arrowhead)" />
+  <text x="1140" y="200" class="text" style="text-anchor: start;">Yes</text>
+  
+  <!-- Row 2 Arrows (R to L) -->
+  <line x1="1010" y1="110" x2="985" y2="110" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="820" y1="110" x2="795" y2="110" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="630" y1="110" x2="605" y2="110" class="arrow" marker-end="url(#arrowhead)" />
+  <line x1="440" y1="110" x2="415" y2="110" class="arrow" marker-end="url(#arrowhead)" />
+  
+  <!-- No path (Rollback) -->
+  <line x1="1130" y1="250" x2="1130" y2="210" class="arrow" marker-end="url(#arrowhead)" />
+  <text x="1140" y="230" class="text" style="text-anchor: start;">No (Rollback)</text>
+</svg>
