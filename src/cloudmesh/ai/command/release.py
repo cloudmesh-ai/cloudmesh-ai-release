@@ -30,6 +30,19 @@ console = Console()
 class ReleaseGroup(click.Group):
     sort_commands = False
 
+    def list_commands(self, ctx):
+        """Explicitly define the order of commands in help output."""
+        return [
+            "validate",
+            "baseline",
+            "testpypi",
+            "pypi",
+            "check",
+            "version",
+            "now",
+            "rollback",
+        ]
+
 class ReleaseManager:
     """Manages the state and execution of a package release process."""
 
