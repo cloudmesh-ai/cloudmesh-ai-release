@@ -27,13 +27,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 # Initialize Rich console
 console = Console()
 
-class ReleaseGroup(click.Group):
-    """Custom group to add a footer to the help output."""
-    def format_help(self, ctx):
-        help_text = super().format_help(ctx)
-        order_text = "\nOrder:\n  1. validate -> 2. baseline -> 3. testpypi -> 4. pypi -> 5. check"
-        return help_text + order_text
-
 class ReleaseManager:
     """Manages the state and execution of a package release process."""
 
@@ -308,10 +301,13 @@ class ReleaseManager:
         self.state_file.unlink()
         self._log("Rollback complete. Local environment restored.", "INFO")
 
-@ReleaseGroup()
+@click.group()
 def release_group():
     """
     Release automation tool for Cloudmesh AI packages.
+
+    Order:
+      1. validate -> 2. baseline -> 3. testpypi -> 4. pypi -> 5. check
     """
     pass
 
