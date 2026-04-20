@@ -339,9 +339,9 @@ def validate_cmd(packagename, dry_run):
             manager.check_dependencies()
             manager.check_git_clean()
         manager.mark_step_complete("validate")
-        console.print("[green]Validation successful![/green]")
+        console.print("\n[green]Validation successful![/green]")
     except Exception as e:
-        console.print(f"[bold red]Validation failed:[/bold red] {e}")
+        console.print(f"\n[bold red]Validation failed:[/bold red] {e}")
         sys.exit(1)
 
 @release_group.command(name="baseline")
@@ -548,7 +548,8 @@ def release_cmd(packagename, dry_run, version, skip_testpypi):
         table.add_row("Package", manager.package_name)
         table.add_row("Final Version", final_v)
         table.add_row("Log File", str(manager.log_file))
-        console.print("\n", table)
+        console.print("\n")
+        console.print(table)
 
     except Exception as e:
         console.print(f"\n[bold red]Release failed:[/bold red] {e}")
