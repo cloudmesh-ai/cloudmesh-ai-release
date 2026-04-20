@@ -250,6 +250,66 @@ class ReleaseManager:
             self._log(f"Could not determine SCM version: {e}", "ERROR")
             raise RuntimeError("Failed to determine package version from Git tags.")
 
+    def is_commit_hash(self, version: str) -> bool:
+        """Checks if the version string looks like a git commit hash rather than a semantic version."""
+        # Semantic versions usually have dots. Commit hashes are hex strings.
+        if "." in version:
+            return False
+        # Check if it's a hex string of typical commit hash length (7-40)
+        return bool(re.match(r'^[0-9a-f]{7,40}$', version.lower()))
+
+    def bump_patch_version(self, version: str) -> str:
+        """Increments the patch version of a semantic version string (x.y.z -> x.y.z+1)."""
+        parts = version.split('.')
+        if len(parts) != 3:
+            raise RuntimeError(f"Invalid semantic version for bumping: {version}. Expected x.y.z")
+        
+        major, minor, patch = parts
+        return f"{major}.{minor}.{int(patch) + 1}"
+
+    def get_next_dev_version(self) -> str:
+        """
+        Calculates the next .devN version based on existing git tags.
+        - If latest is vX.Y.Z.devN -> vX.Y.Z.dev(N+1)
+        - If latest is vX.Y.Z -> vX.Y.(Z+1).dev1
+        - If no tags -> v0.1.0.dev1
+        """
+        try:
+            tags_res = self.run_command(["git", "tag", "-l"])
+            tags = tags_res.stdout.splitlines()
+        except Exception:
+            tags = []
+
+        # Filter for tags starting with 'v' and containing digits
+        semver_tags = []
+        for t in tags:
+            if t.startswith('v') and any(char.isdigit() for char in t):
+                semver_tags.append(t[1:]) # Remove 'v'
+
+        if not semver_tags:
+            return "0.1.0.dev1"
+
+        # Sort tags to find the latest (simple sort works for most semver)
+        # For a more robust solution, we'd use packaging.version
+        semver_tags.sort(reverse=True)
+        latest = semver_tags[0]
+
+        if ".dev" in latest:
+            # Case: vX.Y.Z.devN
+            base, dev_part = latest.rsplit(".dev", 1)
+            try:
+                next_n = int(dev_part) + 1
+                return f"{base}.dev{next_n}"
+            except ValueError:
+                return f"{base}.dev1"
+        else:
+            # Case: vX.Y.Z
+            try:
+                next_v = self.bump_patch_version(latest)
+                return f"{next_v}.dev1"
+            except RuntimeError:
+                return "0.1.0.dev1"
+
     def init_logging(self, version: str):
         """Initializes the log file with the version number."""
         self.log_file = self.package_dir / f"release_{version}.log"
@@ -483,20 +543,17 @@ def testpypi_cmd(packagename, dry_run, version):
     """Perform TestPyPI validation phase."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     try:
-        # Use SCM version if not provided
-        current_v = manager.get_scm_version()
-        log_v = version or current_v
-        manager.init_logging(log_v)
+        # Determine the dev version for TestPyPI
+        test_v = version or manager.get_next_dev_version()
+        manager.init_logging(test_v)
         
-        # For TestPyPI, we typically use a dev version. 
-        # Since we removed bump_version, we rely on the user providing a version 
-        # or we use the current SCM version.
-        test_v = version or current_v
+        # Create the dev tag before uploading
+        manager.create_tag(test_v)
         
         manager.build_package()
         manager.upload_to_pypi("testpypi")
         
-        if click.confirm("Please verify the installation on TestPyPI. Did it work?"):
+        if click.confirm(f"Please verify the installation of version {test_v} on TestPyPI. Did it work?"):
             manager.mark_step_complete("testpypi")
             console.print("[green]TestPyPI validation successful![/green]")
         else:
@@ -517,10 +574,13 @@ def pypi_cmd(packagename, dry_run, version):
     try:
         current_v = manager.get_scm_version()
         final_v = version or current_v
-        manager.init_logging(final_v)
         
-        # NEW ORDER: Tag -> Build -> Upload
-        manager.create_tag(final_v)
+        # If no version provided and SCM returns a hash, prompt for a semantic version
+        if not version and manager.is_commit_hash(final_v):
+            console.print(f"[yellow]Warning: SCM version is a commit hash ({final_v}).[/yellow]")
+            final_v = click.prompt("Please enter a starting semantic version (e.g., 0.1.0)")
+        
+        manager.init_logging(final_v)
         manager.build_package()
         
         console.print(Panel(
@@ -535,6 +595,16 @@ def pypi_cmd(packagename, dry_run, version):
             if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                 manager.upload_to_pypi("pypi")
                 manager._log("Official PyPI release complete!", "INFO")
+                
+                # Post-release: Bump version and set up next dev cycle
+                try:
+                    next_v = manager.bump_patch_version(final_v)
+                    manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
+                    manager.create_tag(next_v)
+                    manager.create_tag(f"{next_v}.dev1")
+                    manager._log(f"Next release target set to v{next_v} and dev version to v{next_v}.dev1", "INFO")
+                except Exception as e:
+                    manager._log(f"Post-release tagging failed: {e}", "WARNING")
             else:
                 console.print("[red]Upload cancelled.[/red]")
         else:
@@ -565,7 +635,14 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         
         # Determine version for logging
         current_v = manager.get_scm_version()
-        log_v = version or current_v
+        final_v = version or current_v
+        
+        # If no version provided and SCM returns a hash, prompt for a semantic version
+        if not version and manager.is_commit_hash(final_v):
+            console.print(f"[yellow]Warning: SCM version is a commit hash ({final_v}).[/yellow]")
+            final_v = click.prompt("Please enter a starting semantic version (e.g., 0.1.0)")
+        
+        log_v = final_v
         manager.init_logging(log_v)
         
         # Changelog
@@ -580,12 +657,13 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
 
         # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
-            test_v = version or current_v
-            if click.confirm(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Build and upload version {test_v} to TestPyPI?"):
+            test_v = version or manager.get_next_dev_version()
+            if click.confirm(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?"):
+                manager.create_tag(test_v)
                 manager.build_package()
                 manager.upload_to_pypi("testpypi")
                 
-                console.print("\n[bold yellow]ACTION REQUIRED:[/bold yellow] Please install the package from TestPyPI in a clean environment to verify it works.")
+                console.print(f"\n[bold yellow]ACTION REQUIRED:[/bold yellow] Please install version {test_v} from TestPyPI in a clean environment to verify it works.")
                 if click.confirm("Did the TestPyPI installation and verification work?"):
                     manager._log("TestPyPI verification successful.", "INFO")
                     manager.mark_step_complete("testpypi")
@@ -597,7 +675,6 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
 
         # 4. Final PyPI Phase (Production)
-        final_v = version or current_v
         if click.confirm(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?"):
             # NEW ORDER: Tag -> Build -> Upload
             manager.create_tag(final_v)
@@ -616,6 +693,16 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                     manager.upload_to_pypi("pypi")
                     manager._log("Official PyPI release complete!", "INFO")
+                    
+                    # Post-release: Bump version and set up next dev cycle
+                    try:
+                        next_v = manager.bump_patch_version(final_v)
+                        manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
+                        manager.create_tag(next_v)
+                        manager.create_tag(f"{next_v}.dev1")
+                        manager._log(f"Next release target set to v{next_v} and dev version to v{next_v}.dev1", "INFO")
+                    except Exception as e:
+                        manager._log(f"Post-release tagging failed: {e}", "WARNING")
                 else:
                     console.print("[red]Upload cancelled.[/red]")
             else:
