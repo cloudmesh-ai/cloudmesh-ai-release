@@ -153,6 +153,24 @@ class TestReleaseCLI:
             assert result.exit_code == 0
             assert "Baseline created successfully!" in result.output
 
+    @patch("subprocess.run")
+    def test_create_baseline_nothing_to_commit(self, mock_run, tmp_release_dir, mock_pyproject):
+        # Mock rev-parse for baseline commit hash
+        # Mock git describe for version
+        # Mock git add .
+        # Mock git commit to fail with "nothing to commit"
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=["git", "rev-parse", "HEAD"], returncode=0, stdout="abc1234\n"),
+            subprocess.CompletedProcess(args=["git", "describe", "--tags", "--always", "--dirty"], returncode=0, stdout="1.0.0\n"),
+            subprocess.CompletedProcess(args=["git", "add", "."], returncode=0),
+            subprocess.CalledProcessError(returncode=1, cmd=["git", "commit"], stderr="nothing to commit, working tree clean")
+        ]
+        
+        manager = ReleaseManager(str(tmp_release_dir))
+        # This should not raise an exception
+        manager.create_baseline()
+        assert manager.state["baseline_commit"] == "abc1234"
+
     def test_rollback_cmd(self, tmp_release_dir, mock_pyproject):
         runner = CliRunner()
         with patch("cloudmesh.ai.command.release.ReleaseManager.rollback"):

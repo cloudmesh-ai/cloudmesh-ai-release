@@ -302,9 +302,20 @@ class ReleaseManager:
         commit = self.run_command(["git", "rev-parse", "HEAD"]).stdout.strip()
         self.state["baseline_commit"] = commit
         
+        # Determine version for commit message
+        version = self.target_version or self.get_scm_version() or "dev"
+        
         # Commit current changes
         self.run_command(["git", "add", "."])
-        self.run_command(["git", "commit", "-m", f"Baseline for release {self.target_version or 'dev'}"])
+        try:
+            self.run_command(["git", "commit", "-m", f"Baseline for release {version}"])
+        except subprocess.CalledProcessError as e:
+            # Handle case where there is nothing to commit
+            error_msg = (e.stdout or "") + (e.stderr or "")
+            if "nothing to commit" in error_msg.lower():
+                self._log("No changes to commit for baseline.", "INFO")
+            else:
+                raise e
         self.save_state()
 
     def build_package(self):
