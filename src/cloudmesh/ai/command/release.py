@@ -113,13 +113,14 @@ class ReleaseManager:
                 text=True, 
                 check=True
             )
-            if result.stdout:
+            if result.stdout and self.log_file:
                 with open(self.log_file, "a") as f:
                     f.write(f"STDOUT:\n{result.stdout}\n")
             return result
         except subprocess.CalledProcessError as e:
-            with open(self.log_file, "a") as f:
-                f.write(f"STDERR:\n{e.stderr}\n")
+            if self.log_file:
+                with open(self.log_file, "a") as f:
+                    f.write(f"STDERR:\n{e.stderr}\n")
             raise e
 
     def save_state(self):
@@ -304,6 +305,9 @@ class ReleaseManager:
 def release_group():
     """
     Release automation tool for Cloudmesh AI packages.
+
+    Order:
+      1. validate -> 2. baseline -> 3. testpypi -> 4. pypi -> 5. check
     """
     pass
 
