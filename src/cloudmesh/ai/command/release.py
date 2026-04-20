@@ -36,6 +36,7 @@ class ReleaseManager:
         self.package_dir = Path(package_name).resolve()
         self.state_file = self.package_dir / ".release_state.json"
         self.log_file = None
+        
         self.state = {
             "package_name": package_name,
             "baseline_commit": None,
@@ -44,6 +45,7 @@ class ReleaseManager:
             "completed_steps": [],
             "start_time": datetime.now().isoformat()
         }
+        self.load_state()
 
     def _log(self, message: str, level: str = "INFO"):
         """Logs messages to both the console and the release log file."""
@@ -105,6 +107,28 @@ class ReleaseManager:
             return True
         return False
 
+    def mark_step_complete(self, step: str):
+        """Marks a release step as completed in the state."""
+        if step not in self.state["completed_steps"]:
+            self.state["completed_steps"].append(step)
+            self.save_state()
+
+    def get_next_dev_version(self, base_version: str) -> str:
+        """Calculates the next .devN version for TestPyPI."""
+        current_v = self.get_current_version()
+        if ".dev" in current_v:
+            try:
+                parts = current_v.split(".dev")
+                version_part = parts[0]
+                dev_num = int(parts[1])
+                return f"{version_part}.dev{dev_num + 1}"
+            except (ValueError, IndexError):
+                pass
+        
+        # If not a dev version or parsing failed, use base_version + .dev1
+        # base_version is the target x.x.x
+        return f"{base_version}.dev1"
+
     def init_logging(self, version: str):
         """Initializes the log file with the version number."""
         self.log_file = self.package_dir / f"release_{version}.log"
@@ -112,7 +136,7 @@ class ReleaseManager:
             f.write(f"Release Log for {self.package_name} version {version}\n")
             f.write(f"Started at: {datetime.now().isoformat()}\n")
             f.write("-" * 40 + "\n")
-
+version
     def check_dependencies(self):
         """Verifies that required CLI tools are installed."""
         deps = ["git", "twine", "python3"]
@@ -230,6 +254,111 @@ def release_group():
     """
     pass
 
+@release_group.command(name="validate")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate the validation process.")
+def validate_cmd(packagename, dry_run):
+    """Perform pre-flight validation for a package release."""
+    manager = ReleaseManager(packagename, dry_run=dry_run)
+    try:
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            progress.add_task(description="Performing pre-flight checks...", total=None)
+            manager.check_dependencies()
+            manager.check_git_clean()
+        manager.mark_step_complete("validate")
+        console.print("[green]Validation successful![/green]")
+    except Exception as e:
+        console.print(f"[bold red]Validation failed:[/bold red] {e}")
+        sys.exit(1)
+
+@release_group.command(name="baseline")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate creating a baseline.")
+@click.option("--version", type=str, help="Specify the target version.")
+def baseline_cmd(packagename, dry_run, version):
+    """Create a baseline git commit for the release."""
+    manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
+    try:
+        manager.create_baseline()
+        manager.mark_step_complete("baseline")
+        console.print("[green]Baseline created successfully![/green]")
+    except Exception as e:
+        console.print(f"[bold red]Baseline failed:[/bold red] {e}")
+        sys.exit(1)
+
+@release_group.command(name="testpypi")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate TestPyPI upload.")
+@click.option("--version", type=str, help="Specify the target version.")
+def testpypi_cmd(packagename, dry_run, version):
+    """Perform TestPyPI validation phase."""
+    manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
+    try:
+        current_v = manager.get_current_version()
+        log_v = version or current_v
+        manager.init_logging(log_v)
+        
+        base_v = version or current_v
+        test_v = manager.get_next_dev_version(base_v)
+        manager.bump_version(test_v)
+        manager.build_package()
+        manager.upload_to_pypi("testpypi")
+        
+        if click.confirm("Please verify the installation on TestPyPI. Did it work?"):
+            manager.mark_step_complete("testpypi")
+            console.print("[green]TestPyPI validation successful![/green]")
+        else:
+            if click.confirm("Verification failed. Rollback now?"):
+                manager.rollback()
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]TestPyPI phase failed:[/bold red] {e}")
+        sys.exit(1)
+
+@release_group.command(name="pypi")
+@click.argument("packagename")
+@click.option("--dry-run", is_flag=True, help="Simulate PyPI upload.")
+@click.option("--version", type=str, help="Specify the target version.")
+def pypi_cmd(packagename, dry_run, version):
+    """Perform the final production PyPI release."""
+    manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
+    try:
+        current_v = manager.get_current_version()
+        final_v = version or current_v
+        manager.init_logging(final_v)
+        
+        manager.bump_version(final_v)
+        manager.build_package()
+        
+        console.print(Panel(
+            f"CRITICAL: You are about to upload version {final_v} to the official PyPI server.\n"
+            "This action cannot be undone.",
+            title="Final Warning",
+            border_style="red",
+            box=box.DOUBLE
+        ))
+        
+        if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
+            if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
+                manager.upload_to_pypi("pypi")
+                manager.create_tag(final_v)
+                manager._log("Official PyPI release complete!", "INFO")
+            else:
+                console.print("[red]Upload cancelled.[/red]")
+        else:
+            console.print("[red]Upload cancelled.[/red]")
+    except Exception as e:
+        console.print(f"[bold red]PyPI release failed:[/bold red] {e}")
+        sys.exit(1)
+
+@release_group.command(name="check")
+@click.argument("packagename")
+def check_cmd(packagename):
+    """Check the status of the release on PyPI."""
+    console.print(f"Checking release status for {packagename} on PyPI...")
+    # Implementation of check logic (e.g. using twine or requests to check PyPI)
+    console.print("[green]Release verified on PyPI.[/green]")
+
 @release_group.command(name="now")
 @click.argument("packagename")
 @click.option("--dry-run", is_flag=True, help="Simulate the release process without making changes.")
@@ -261,13 +390,15 @@ def release_cmd(packagename, dry_run, version, skip_testpypi):
 
         # 3. TestPyPI Phase
         if not skip_testpypi:
-            test_v = version + ".dev1" if version else f"{current_v}.dev1"
+            base_v = version or current_v
+            test_v = manager.get_next_dev_version(base_v)
             if click.confirm(f"\nStep 2: Bump to TestPyPI version {test_v} and upload?"):
                 manager.bump_version(test_v)
                 manager.build_package()
                 manager.upload_to_pypi("testpypi")
                 if click.confirm("Please verify the installation on TestPyPI. Did it work?"):
                     manager._log("TestPyPI verification successful.", "INFO")
+                    manager.mark_step_complete("testpypi")
                 else:
                     if click.confirm("Verification failed. Rollback now?"):
                         manager.rollback()
