@@ -6,20 +6,32 @@ By enforcing pre-flight checks, managing state, and providing a "safety net" via
 
 ## Quickstart
 
-For a standard release of a package (e.g., `cloudmesh-ai-cmc`), you have two options. 
-
-**Tip:** If you are already inside the package directory, you can use `.` as the package name, and the tool will automatically detect the package name from the `pyproject.toml` file.
+The tool is designed to be flexible regarding your working directory. You can run it from a parent directory by specifying the package path, or from within the package directory itself.
 
 ### Option 1: The Wizard (Recommended)
-Run the interactive wizard that guides you through all steps:
+
+Run the interactive wizard that guides you through all steps.
+
+**From a parent directory:**
+
 ``` bash
+# Specify the path to the package root
 cmc release now cloudmesh-ai-cmc
-# OR if you are in the package directory:
+```
+
+**From within the package directory:**
+
+``` bash
+# Use '.' to indicate the current directory
 cmc release now .
 ```
 
+The tool will automatically detect the actual package name from the `pyproject.toml` file located at the specified path.
+
 ### Option 2: Granular Control
+
 Execute each phase manually:
+
 ``` bash
 cmc release validate cloudmesh-ai-cmc
 cmc release baseline cloudmesh-ai-cmc
@@ -32,16 +44,17 @@ cmc release check cloudmesh-ai-cmc
 
 ## Usage
 
+stead do b
+
 ``` text
 Usage:
-  cmc release now [options] <packagename>
-  cmc release validate <packagename>
-  cmc release baseline [options] <packagename>
-  cmc release testpypi [options] <packagename>
-  cmc release pypi [options] <packagename>
-  cmc release check <packagename>
-  cmc release version [action] <packagename>
-  cmc release rollback [options] <packagename>
+  cmc release now [options] <package_path>
+  cmc release validate <package_path>
+  cmc release baseline [options] <package_path>
+  cmc release testpypi [options] <package_path>
+  cmc release pypi [options] <package_path>
+  cmc release check <package_path>
+  cmc release rollback [options] <package_path>
   cmc release (-h | --help)
 
 Options:
@@ -57,9 +70,9 @@ Options:
 
 The primary entry point for releasing a package. It initiates an interactive wizard.
 
-- **`<packagename>`**: The directory name of the package to release (must contain a `VERSION` file).
+- **`<package_path>`**: The path to the root directory of the package to release. This can be a relative path (e.g., `cloudmesh-ai-cmc`) or `.` if you are already inside the package directory.
 - **`--dry-run`**: Simulates the entire process. No files are changed, no tags created, and no uploads performed.
-- **`--version <text>`**: Force a specific target version. If omitted, the version in the package's `VERSION` file is used.
+- **`--version <text>`**: Force a specific target version. If omitted, the version is determined by Git tags (via `setuptools-scm`).
 - **`--skip-testpypi`**: Skip the TestPyPI validation phase and go straight to production.
 
 **Example: Standard Release**
@@ -80,14 +93,6 @@ cmc release now cloudmesh-ai-cmc --skip-testpypi
 cmc release now cloudmesh-ai-cmc --version 1.2.0 --dry-run
 ```
 
-#### `version`
-
-Manage and inspect package versions.
-
-- **`<packagename>`**: Print the current version and suggested next steps.
-- **`dev+ <packagename>`**: Increment the development version suffix (e.g., `1.0.0.dev1` $\rightarrow$ `1.0.0.dev2`).
-- **`prod+ <packagename>`**: Increment the production patch version (e.g., `1.0.0` $\rightarrow$ `1.0.1`).
-
 #### `rollback`
 
 Emergency recovery tool to restore the local environment to the pre-release state.
@@ -103,25 +108,87 @@ cmc release rollback cloudmesh-ai-cmc
 
 ------------------------------------------------------------------------
 
+## Version Management
+
+This tool leverages `setuptools-scm` for dynamic versioning, ensuring that the version of the released package is always perfectly synchronized with the Git history.
+
+### How it Works
+
+Instead of hardcoding a version string in `pyproject.toml` or `setup.py`, the version is derived from the most recent Git tag.
+
+1.  **Tag as Version**: When the tool creates a Git tag (e.g., `v1.2.3`), `setuptools-scm` detects this tag during the `make build` phase.
+2.  **Automatic Injection**: The version `1.2.3` is automatically injected into the package metadata.
+3.  **Single Source of Truth**: The Git tag is the only place where the version is defined, eliminating the risk of "version mismatch" between the code and the PyPI upload.
+
+### Overriding the Version
+
+While automatic tagging is recommended, you can force a specific version using the `--version` flag: `cmc release now <package> --version 1.2.4`
+
+In this case, the tool will use the provided version for the build and create the corresponding Git tag to maintain consistency.
+
+------------------------------------------------------------------------
+
 ## How it Works: The Release Lifecycle
 
-When you run `cmc release now`, the tool executes the following lifecycle:
+The release process is designed as a safety-first pipeline. It ensures that no broken package ever reaches the official PyPI repository.
 
-### Phase 1: Pre-flight Validation
+### Workflow Diagram
 
-Before any changes are made, the tool verifies: - **Dependencies**: Checks for `git`, `twine`, and `python` in the system PATH. - **Git Hygiene**: Ensures the working directory is clean (`git status --porcelain`). You cannot release from a dirty tree to ensure the baseline is accurate.
+``` mermaid
+graph TD;
+    A-->B;
+    A-->C;
+    B-->D;
+    C-->D;
+```
 
-### Phase 2: Establishing the Baseline
+``` mermaid
+graph LR
+    %% Style Definitions
+    classDef white fill:#ffffff,stroke:#333,stroke-width:1px;
+    classDef yellow fill:#ffffcc,stroke:#d4d4aa,stroke-width:1px;
+    classDef blue fill:#e6f3ff,stroke:#adcceb,stroke-width:1px;
+    classDef green fill:#e6ffed,stroke:#c2e0c6,stroke-width:1px;
+
+    Develop[Develop<br/><small>develop your code</small>] --> A[Start Release<br/><small>cmc release now</small>]
+    A --> B{Pre-flight Checks<br/><small>cmc release validate</small>}
+    B -- Fail --> C[Stop/Fix]
+    B -- Pass --> D[Create Baseline Commit<br/><small>cmc release baseline</small>]
+    D --> E[Build Package<br/><small>make build</small>]
+    E --> F[Upload to TestPyPI<br/><small>cmc release testpypi</small>]
+    F --> G{User Verifies Install?<br/><small>cmc release check</small>}
+    G -- No -.-> Develop
+    G -- Yes --> I[Create Git Tag<br/><small>git tag & push</small>]
+    I --> J[Build Final Artifacts<br/><small>make build</small>]
+    J --> K[Upload to PyPI<br/><small>cmc release pypi</small>]
+    K --> M[Final Validation<br/><small>pip install & test</small>]
+    M --> L[Release Complete<br/><small>Done</small>]
+    L -.-> Develop
+
+    %% Assign Classes
+    class Develop,A,B,C,D white;
+    class E,F,G,H yellow;
+    class I,J,K blue;
+    class L green;
+```
+
+### Detailed Phases
+
+#### Phase 1: Pre-flight Validation
+
+Before any changes are made, the tool verifies: - **Dependencies**: Checks for `git`, `twine`, and `python` in the system PATH. - **Build Module**: Ensures `python -m build` is available. - **Git Hygiene**: Ensures the working directory is clean (`git status --porcelain`). You cannot release from a dirty tree to ensure the baseline is accurate.
+
+#### Phase 2: Establishing the Baseline
 
 To ensure a 100% recovery path, the tool: 1. Captures the current `HEAD` commit hash. 2. Creates a "Baseline" commit containing all current changes. 3. Saves this state to `.release_state.json`.
 
-### Phase 3: TestPyPI Validation (The Sandbox)
+#### Phase 3: TestPyPI Validation (The Sandbox)
 
-To prevent "broken" releases from hitting production: 1. **Version Bump**: Automatically appends `.dev1` to the version (e.g., `1.0.0` $\rightarrow$ `1.0.0.dev1`). 2. **Build**: Executes `python -m build` to create `.whl` and `.tar.gz` artifacts. 3. **Upload**: Uses `twine` to upload to the TestPyPI repository. 4. **Verification**: The wizard pauses and asks the user to manually install the package from TestPyPI to verify it works.
+To prevent "broken" releases from hitting production: 1. **Build**: Executes `python -m build` to create `.whl` and `.tar.gz` artifacts. 2. **Upload**: Uses `twine` to upload to the TestPyPI repository. 3. **Verification**: The wizard pauses and asks the user to manually install the package from TestPyPI to verify it works. **This is a critical gate; the process will not proceed to production without user confirmation.**
 
-### Phase 4: Production Release
+#### Phase 4: Production Release
 
-Once validated: 1. **Final Bump**: Sets the version to the final target (e.g., `1.0.0`). 2. **Build**: Re-builds the artifacts for the final version. 3. **Double-Confirmation**: Displays a high-visibility red warning panel. The user must confirm **twice** before the upload proceeds. 4. **PyPI Upload**: Uploads the final artifacts to the official PyPI server. 5. **Git Tagging**: Creates an annotated tag (e.g., `v1.0.0`) and pushes it to `origin main`.
+Once validated: 1. **Git Tagging**: Creates an annotated tag (e.g., `v1.0.0`) and pushes it to `origin main`. - *Command:* `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z` 2. **Build**: Re-builds the artifacts for the final version to ensure the tag is included. - *Command:* `make build` (or `python -m build`) 3. **Double-Confirmation**: Displays a high-visibility red warning panel. The user must confirm **twice** before the upload proceeds. 4. **PyPI Upload**: Uploads the final artifacts to the official PyPI server. 5. **Final Validation**: A critical final check to ensure the production package is installable and functional. - *Action:* Perform a fresh `pip install` of the released version in a clean environment and run the test suite (e.g., `pytest`).
 
 ------------------------------------------------------------------------
 
@@ -178,14 +245,13 @@ make install
 
 Use the provided `Makefile` for standard tasks:
 
-| Target               | Action                                     |
-|:---------------------|:-------------------------------------------|
-| `make test`          | Run the pytest suite                       |
-| `make test-cov`      | Run tests with coverage report             |
-| `make build`         | Build sdist and wheel distributions        |
-| `make check`         | Validate distribution metadata using twine |
-| `make clean`         | Remove build artifacts and cache           |
-| `make patch V=x.y.z` | Update the version in the `VERSION` file   |
+| Target          | Action                                     |
+|:----------------|:-------------------------------------------|
+| `make test`     | Run the pytest suite                       |
+| `make test-cov` | Run tests with coverage report             |
+| `make build`    | Build sdist and wheel distributions        |
+| `make check`    | Validate distribution metadata using twine |
+| `make clean`    | Remove build artifacts and cache           |
 
 ## License
 

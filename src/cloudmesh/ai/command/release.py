@@ -38,16 +38,16 @@ class ReleaseGroup(click.Group):
             "testpypi",
             "pypi",
             "check",
-            "version",
             "now",
             "rollback",
         ]
 
 class ReleaseConfig:
-    """Manages the release configuration file .release_config.json."""
+    """Manages the release configuration and bulk state files."""
     
-    def __init__(self, config_path: str = ".release_config.json"):
+    def __init__(self, config_path: str = ".release_config.json", state_path: str = ".release_plan_state.json"):
         self.config_path = Path(config_path)
+        self.state_path = Path(state_path)
         self.data = self._load()
 
     def _load(self) -> Dict[str, Any]:
@@ -78,6 +78,25 @@ class ReleaseConfig:
 
     def get_packages(self) -> List[str]:
         return self.data.get("packages", [])
+
+    def save_plan_state(self, last_package: str, status: str):
+        """Saves the progress of a bulk release."""
+        state = {"last_package": last_package, "status": status}
+        self.state_path.write_text(json.dumps(state, indent=4))
+
+    def load_plan_state(self) -> Optional[Dict[str, Any]]:
+        """Loads the progress of a bulk release."""
+        if self.state_path.exists():
+            try:
+                return json.loads(self.state_path.read_text())
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    def clear_plan_state(self):
+        """Clears the bulk release state."""
+        if self.state_path.exists():
+            self.state_path.unlink()
 
 class ReleaseManager:
     """Manages the state and execution of a package release process."""
@@ -217,44 +236,19 @@ class ReleaseManager:
             self.state["completed_steps"].append(step)
             self.save_state()
 
-    def get_next_dev_version(self, base_version: str) -> str:
-        """Calculates the next .devN version for TestPyPI."""
-        current_v = self.get_current_version()
-        if ".dev" in current_v:
-            try:
-                parts = current_v.split(".dev")
-                version_part = parts[0]
-                dev_num = int(parts[1])
-                return f"{version_part}.dev{dev_num + 1}"
-            except (ValueError, IndexError):
-                pass
-        
-        # If not a dev version or parsing failed, use base_version + .dev1
-        # base_version is the target x.x.x
-        return f"{base_version}.dev1"
-
-    def increment_prod_version(self) -> str:
-        """Increments the patch version (x.y.z -> x.y.z+1)."""
-        version = self.get_current_version()
-        match = re.match(r"(\d+\.\d+\.\d+)(?:\.dev(\d+))?", version)
-        if not match:
-            raise RuntimeError(f"Version {version} does not match expected format x.y.z[.devN]")
-        
-        base = match.group(1)
-        parts = base.split(".")
-        parts[-1] = str(int(parts[-1]) + 1)
-        return ".".join(parts)
-
-    def increment_dev_version(self) -> str:
-        """Increments the .devN suffix."""
-        version = self.get_current_version()
-        match = re.match(r"(\d+\.\d+\.\d+)(?:\.dev(\d+))?", version)
-        if not match:
-            raise RuntimeError(f"Version {version} does not match expected format x.y.z[.devN]")
-        
-        base = match.group(1)
-        dev = int(match.group(2)) if match.group(2) else 0
-        return f"{base}.dev{dev + 1}"
+    def get_scm_version(self) -> str:
+        """Gets the current version using git describe (setuptools-scm style)."""
+        try:
+            # --tags: use tags, --always: fallback to commit hash, --dirty: append -dirty if changes exist
+            result = self.run_command(["git", "describe", "--tags", "--always", "--dirty"])
+            version = result.stdout.strip()
+            # Remove 'v' prefix if present for internal use
+            if version.startswith("v"):
+                version = version[1:]
+            return version
+        except Exception as e:
+            self._log(f"Could not determine SCM version: {e}", "ERROR")
+            raise RuntimeError("Failed to determine package version from Git tags.")
 
     def init_logging(self, version: str):
         """Initializes the log file with the version number."""
@@ -299,19 +293,7 @@ class ReleaseManager:
         except subprocess.CalledProcessError:
             return False
 
-    def get_current_version(self) -> str:
-        """Reads the version from the VERSION file."""
-        version_file = self.package_dir / "VERSION"
-        if not version_file.exists():
-            raise FileNotFoundError(f"VERSION file not found in {self.package_dir}")
-        return version_file.read_text().strip()
-
-    def bump_version(self, new_version: str):
-        """Bumps the version in the VERSION file."""
-        self._log(f"Bumping version to {new_version}...", "INFO")
-        version_file = self.package_dir / "VERSION"
-        version_file.write_text(new_version + "\n")
-        self.save_state()
+    # VERSION file methods removed in favor of setuptools-scm
 
     def create_baseline(self):
         """Creates a baseline git commit of the current state."""
@@ -326,9 +308,37 @@ class ReleaseManager:
         self.save_state()
 
     def build_package(self):
-        """Builds the package using the build module."""
+        """Builds the package using the build module and verifies artifacts."""
         self._log("Building package artifacts...", "INFO")
-        self.run_command([sys.executable, "-m", "build"], stream=True)
+        
+        # In dry-run, we still want to verify that the build process works
+        # so we execute the build but we will log it as a verification step.
+        is_dry = self.dry_run
+        if is_dry:
+            self._log("[DRY-RUN] Verifying build process by executing build...", "DEBUG")
+            # We use a direct subprocess call to bypass the dry_run simulation in run_command
+            try:
+                subprocess.run([sys.executable, "-m", "build"], cwd=self.package_dir, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Build verification failed: {e.stderr.decode()}") from e
+        else:
+            self.run_command([sys.executable, "-m", "build"], stream=True)
+
+        # Verify artifacts
+        dist_dir = self.package_dir / "dist"
+        if not dist_dir.exists():
+            raise RuntimeError("Build completed but 'dist' directory was not created.")
+        
+        artifacts = list(dist_dir.glob("*"))
+        if not artifacts:
+            raise RuntimeError("Build completed but no artifacts were found in 'dist' directory.")
+        
+        for art in artifacts:
+            self._log(f"Verified artifact: {art.name}", "INFO")
+        
+        if is_dry:
+            self._log("[DRY-RUN] Cleaning up verification artifacts...", "DEBUG")
+            shutil.rmtree(dist_dir)
 
     def upload_to_pypi(self, repository: str = "pypi"):
         """Uploads the package to PyPI or TestPyPI."""
@@ -462,13 +472,16 @@ def testpypi_cmd(packagename, dry_run, version):
     """Perform TestPyPI validation phase."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     try:
-        current_v = manager.get_current_version()
+        # Use SCM version if not provided
+        current_v = manager.get_scm_version()
         log_v = version or current_v
         manager.init_logging(log_v)
         
-        base_v = version or current_v
-        test_v = manager.get_next_dev_version(base_v)
-        manager.bump_version(test_v)
+        # For TestPyPI, we typically use a dev version. 
+        # Since we removed bump_version, we rely on the user providing a version 
+        # or we use the current SCM version.
+        test_v = version or current_v
+        
         manager.build_package()
         manager.upload_to_pypi("testpypi")
         
@@ -491,11 +504,12 @@ def pypi_cmd(packagename, dry_run, version):
     """Perform the final production PyPI release."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     try:
-        current_v = manager.get_current_version()
+        current_v = manager.get_scm_version()
         final_v = version or current_v
         manager.init_logging(final_v)
         
-        manager.bump_version(final_v)
+        # NEW ORDER: Tag -> Build -> Upload
+        manager.create_tag(final_v)
         manager.build_package()
         
         console.print(Panel(
@@ -509,7 +523,6 @@ def pypi_cmd(packagename, dry_run, version):
         if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
             if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                 manager.upload_to_pypi("pypi")
-                manager.create_tag(final_v)
                 manager._log("Official PyPI release complete!", "INFO")
             else:
                 console.print("[red]Upload cancelled.[/red]")
@@ -527,40 +540,6 @@ def check_cmd(packagename):
     # Implementation of check logic (e.g. using twine or requests to check PyPI)
     console.print("[green]Release verified on PyPI.[/green]")
 
-@release_group.command(name="version")
-@click.argument("action", required=False)
-@click.argument("packagename")
-def version_cmd(action, packagename):
-    """
-    Print current version status or increment version.
-    
-    Actions:
-      dev+    Increment the .devN suffix
-      prod+   Increment the production patch version
-    """
-    manager = ReleaseManager(packagename)
-    current_v = manager.get_current_version()
-    
-    if action == "dev+":
-        next_v = manager.increment_dev_version()
-        manager.bump_version(next_v)
-        console.print(f"[green]Dev version updated: {current_v} -> {next_v}[/green]")
-    elif action == "prod+":
-        next_v = manager.increment_prod_version()
-        manager.bump_version(next_v)
-        console.print(f"[green]Prod version updated: {current_v} -> {next_v}[/green]")
-    else:
-        # Status mode
-        try:
-            next_prod = manager.increment_prod_version()
-            next_dev = manager.increment_dev_version()
-            
-            console.print(f"Current Version: [bold magenta]{current_v}[/bold magenta]")
-            console.print("\nSuggested Next Steps:")
-            console.print(f"  Prod Increment (prod+): [cyan]{next_prod}[/cyan]")
-            console.print(f"  Dev Increment (dev+):   [cyan]{next_dev}[/cyan]")
-        except Exception as e:
-            console.print(f"[red]Error calculating versions: {e}[/red]")
 
 def run_release_wizard(packagename, dry_run, version, skip_testpypi):
     """Core logic for the release wizard, reusable by 'now' and 'do'."""
@@ -574,7 +553,7 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
             manager.check_git_clean()
         
         # Determine version for logging
-        current_v = manager.get_current_version()
+        current_v = manager.get_scm_version()
         log_v = version or current_v
         manager.init_logging(log_v)
         
@@ -588,15 +567,15 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         else:
             console.print("[yellow]Skipping baseline commit. Proceed with caution.[/yellow]")
 
-        # 3. TestPyPI Phase
+        # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
-            base_v = version or current_v
-            test_v = manager.get_next_dev_version(base_v)
-            if click.confirm(f"\nStep 2: Bump to TestPyPI version {test_v} and upload?"):
-                manager.bump_version(test_v)
+            test_v = version or current_v
+            if click.confirm(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Build and upload version {test_v} to TestPyPI?"):
                 manager.build_package()
                 manager.upload_to_pypi("testpypi")
-                if click.confirm("Please verify the installation on TestPyPI. Did it work?"):
+                
+                console.print("\n[bold yellow]ACTION REQUIRED:[/bold yellow] Please install the package from TestPyPI in a clean environment to verify it works.")
+                if click.confirm("Did the TestPyPI installation and verification work?"):
                     manager._log("TestPyPI verification successful.", "INFO")
                     manager.mark_step_complete("testpypi")
                 else:
@@ -604,12 +583,13 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                         manager.rollback()
                         return False
             else:
-                console.print("[yellow]Skipping TestPyPI phase.[/yellow]")
+                console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
 
-        # 4. Final PyPI Phase
+        # 4. Final PyPI Phase (Production)
         final_v = version or current_v
-        if click.confirm(f"\nStep 3: Final Release. Bump to {final_v} and upload to PyPI?"):
-            manager.bump_version(final_v)
+        if click.confirm(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?"):
+            # NEW ORDER: Tag -> Build -> Upload
+            manager.create_tag(final_v)
             manager.build_package()
             
             # Double confirmation for PyPI
@@ -624,7 +604,6 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
             if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
                 if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                     manager.upload_to_pypi("pypi")
-                    manager.create_tag(final_v)
                     manager._log("Official PyPI release complete!", "INFO")
                 else:
                     console.print("[red]Upload cancelled.[/red]")
@@ -707,17 +686,35 @@ def plan_do(dry_run, version, skip_testpypi):
         console.print("[red]No packages configured. Use 'release plan add' first.[/red]")
         return
 
+    # Recovery logic
+    state = config.load_plan_state()
+    if state and state.get("status") != "completed":
+        last_pkg = state.get("last_package")
+        if last_pkg and click.confirm(f"A previous bulk release failed at {last_pkg}. Resume from there?"):
+            try:
+                idx = packages.index(last_pkg)
+                packages = packages[idx:]
+                console.print(f"[yellow]Resuming release from {last_pkg}...[/yellow]")
+            except ValueError:
+                console.print("[red]Last package not found in current plan. Starting from beginning.[/red]")
+
     console.print(Panel(f"Starting bulk release for {len(packages)} packages...", style="bold blue"))
     
     for pkg in packages:
         console.print(Panel(f"Processing package: [bold magenta]{pkg}[/bold magenta]", style="cyan"))
+        
+        # Save state before starting this package
+        config.save_plan_state(pkg, "in_progress")
+        
         success = run_release_wizard(pkg, dry_run, version, skip_testpypi)
         if not success:
+            config.save_plan_state(pkg, "failed")
             if click.confirm(f"Release failed for {pkg}. Continue with remaining packages?"):
                 continue
             else:
                 sys.exit(1)
     
+    config.clear_plan_state()
     console.print("\n[bold green]Bulk release process completed![/bold green]\n")
 
 @plan_group.command(name="now")
