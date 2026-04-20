@@ -301,7 +301,7 @@ class ReleaseManager:
         self.state_file.unlink()
         self._log("Rollback complete. Local environment restored.", "INFO")
 
-@click.group()
+@click.group(sort_commands=False)
 def release_group():
     """
     Release automation tool for Cloudmesh AI packages.
