@@ -31,15 +31,21 @@ class ReleaseManager:
     """Manages the state and execution of a package release process."""
 
     def __init__(self, package_name: str, dry_run: bool = False, version: Optional[str] = None):
-        self.package_name = package_name
         self.dry_run = dry_run
         self.target_version = version
-        self.package_dir = Path(package_name).resolve()
+        
+        if package_name == ".":
+            self.package_dir = Path(".").resolve()
+            self.package_name = self._extract_package_name()
+        else:
+            self.package_name = package_name
+            self.package_dir = Path(package_name).resolve()
+            
         self.state_file = self.package_dir / ".release_state.json"
         self.log_file = None
         
         self.state = {
-            "package_name": package_name,
+            "package_name": self.package_name,
             "baseline_commit": None,
             "original_version": None,
             "created_tag": None,
@@ -47,6 +53,29 @@ class ReleaseManager:
             "start_time": datetime.now().isoformat()
         }
         self.load_state()
+
+    def _extract_package_name(self) -> str:
+        """Extracts the package name from pyproject.toml in the current directory."""
+        pyproject = self.package_dir / "pyproject.toml"
+        if not pyproject.exists():
+            raise FileNotFoundError("pyproject.toml not found in the current directory.")
+        
+        content = pyproject.read_text()
+        # Find the [project] section and then the name = "..." line
+        project_section = False
+        for line in content.splitlines():
+            line = line.strip()
+            if line == "[project]":
+                project_section = True
+                continue
+            if project_section and line.startswith("["):
+                break # Entered another section
+            if project_section:
+                match = re.match(r'^name\s*=\s*["\']([^"\']+)["\']', line)
+                if match:
+                    return match.group(1)
+        
+        raise RuntimeError("Could not find package name in [project] section of pyproject.toml")
 
     def _log(self, message: str, level: str = "INFO"):
         """Logs messages to both the console and the release log file."""

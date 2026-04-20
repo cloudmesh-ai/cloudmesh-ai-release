@@ -6,12 +6,16 @@ By enforcing pre-flight checks, managing state, and providing a "safety net" via
 
 ## Quickstart
 
-For a standard release of a package (e.g., `cloudmesh-ai-cmc`), you have two options:
+For a standard release of a package (e.g., `cloudmesh-ai-cmc`), you have two options. 
+
+**Tip:** If you are already inside the package directory, you can use `.` as the package name, and the tool will automatically detect the package name from the `pyproject.toml` file.
 
 ### Option 1: The Wizard (Recommended)
 Run the interactive wizard that guides you through all steps:
 ``` bash
 cmc release now cloudmesh-ai-cmc
+# OR if you are in the package directory:
+cmc release now .
 ```
 
 ### Option 2: Granular Control
