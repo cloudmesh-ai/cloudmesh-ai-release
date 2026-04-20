@@ -36,6 +36,7 @@ Usage:
   cmc release testpypi [options] <packagename>
   cmc release pypi [options] <packagename>
   cmc release check <packagename>
+  cmc release version [action] <packagename>
   cmc release rollback [options] <packagename>
   cmc release (-h | --help)
 
@@ -74,6 +75,14 @@ cmc release now cloudmesh-ai-cmc --skip-testpypi
 ``` bash
 cmc release now cloudmesh-ai-cmc --version 1.2.0 --dry-run
 ```
+
+#### `version`
+
+Manage and inspect package versions.
+
+- **`<packagename>`**: Print the current version and suggested next steps.
+- **`dev+ <packagename>`**: Increment the development version suffix (e.g., `1.0.0.dev1` $\rightarrow$ `1.0.0.dev2`).
+- **`prod+ <packagename>`**: Increment the production patch version (e.g., `1.0.0` $\rightarrow$ `1.0.1`).
 
 #### `rollback`
 

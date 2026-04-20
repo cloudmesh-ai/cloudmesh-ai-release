@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import click
 import logging
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -129,6 +130,29 @@ class ReleaseManager:
         # base_version is the target x.x.x
         return f"{base_version}.dev1"
 
+    def increment_prod_version(self) -> str:
+        """Increments the patch version (x.y.z -> x.y.z+1)."""
+        version = self.get_current_version()
+        match = re.match(r"(\d+\.\d+\.\d+)(?:\.dev(\d+))?", version)
+        if not match:
+            raise RuntimeError(f"Version {version} does not match expected format x.y.z[.devN]")
+        
+        base = match.group(1)
+        parts = base.split(".")
+        parts[-1] = str(int(parts[-1]) + 1)
+        return ".".join(parts)
+
+    def increment_dev_version(self) -> str:
+        """Increments the .devN suffix."""
+        version = self.get_current_version()
+        match = re.match(r"(\d+\.\d+\.\d+)(?:\.dev(\d+))?", version)
+        if not match:
+            raise RuntimeError(f"Version {version} does not match expected format x.y.z[.devN]")
+        
+        base = match.group(1)
+        dev = int(match.group(2)) if match.group(2) else 0
+        return f"{base}.dev{dev + 1}"
+
     def init_logging(self, version: str):
         """Initializes the log file with the version number."""
         self.log_file = self.package_dir / f"release_{version}.log"
@@ -136,7 +160,7 @@ class ReleaseManager:
             f.write(f"Release Log for {self.package_name} version {version}\n")
             f.write(f"Started at: {datetime.now().isoformat()}\n")
             f.write("-" * 40 + "\n")
-version
+
     def check_dependencies(self):
         """Verifies that required CLI tools are installed."""
         deps = ["git", "twine", "python3"]
@@ -358,6 +382,41 @@ def check_cmd(packagename):
     console.print(f"Checking release status for {packagename} on PyPI...")
     # Implementation of check logic (e.g. using twine or requests to check PyPI)
     console.print("[green]Release verified on PyPI.[/green]")
+
+@release_group.command(name="version")
+@click.argument("action", required=False)
+@click.argument("packagename")
+def version_cmd(action, packagename):
+    """
+    Print current version status or increment version.
+    
+    Actions:
+      dev+    Increment the .devN suffix
+      prod+   Increment the production patch version
+    """
+    manager = ReleaseManager(packagename)
+    current_v = manager.get_current_version()
+    
+    if action == "dev+":
+        next_v = manager.increment_dev_version()
+        manager.bump_version(next_v)
+        console.print(f"[green]Dev version updated: {current_v} -> {next_v}[/green]")
+    elif action == "prod+":
+        next_v = manager.increment_prod_version()
+        manager.bump_version(next_v)
+        console.print(f"[green]Prod version updated: {current_v} -> {next_v}[/green]")
+    else:
+        # Status mode
+        try:
+            next_prod = manager.increment_prod_version()
+            next_dev = manager.increment_dev_version()
+            
+            console.print(f"Current Version: [bold magenta]{current_v}[/bold magenta]")
+            console.print("\nSuggested Next Steps:")
+            console.print(f"  Prod Increment (prod+): [cyan]{next_prod}[/cyan]")
+            console.print(f"  Dev Increment (dev+):   [cyan]{next_dev}[/cyan]")
+        except Exception as e:
+            console.print(f"[red]Error calculating versions: {e}[/red]")
 
 @release_group.command(name="now")
 @click.argument("packagename")
