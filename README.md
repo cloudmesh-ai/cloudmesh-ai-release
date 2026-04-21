@@ -125,7 +125,7 @@ This tool uses a `VERSION` file in the package root as the source of truth, sync
 The tool follows a strict versioning cycle to prevent collisions between TestPyPI and production releases:
 
 1.  **The Source of Truth**: The `VERSION` file and the most recent Git tag define the current state.
-2.  **Version Projection**: Before starting, the tool analyzes PyPI, TestPyPI, and Git tags to project the next logical versions.
+2.  **Version Projection**: Before starting, the tool analyzes PyPI, TestPyPI, and Git tags to project the next logical versions. It performs "smart projection" by automatically incrementing the suggested version if the projected one already exists on PyPI, preventing upload failures.
 3.  **The TestPyPI Cycle (`.dev` versions)**: 
     To avoid uploading a version to TestPyPI that might already exist on PyPI, the tool automatically calculates a development version. 
     - If the last stable version was `1.2.3`, the tool suggests `1.2.4.dev1` for TestPyPI.

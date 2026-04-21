@@ -380,6 +380,19 @@ class ReleaseManager:
         except Exception:
             return "Not found"
 
+    def version_exists_on_pypi(self, version: str) -> bool:
+        """Checks if a specific version exists on PyPI."""
+        url = f"https://pypi.org/pypi/{self.package_name}/{version}/json"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                return response.getcode() == 200
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise e
+        except Exception:
+            return False
+
     def version_exists_on_testpypi(self, version: str) -> bool:
         """Checks if a specific version exists on TestPyPI."""
         url = f"https://test.pypi.org/pypi/{self.package_name}/{version}/json"
@@ -428,6 +441,11 @@ class ReleaseManager:
                 proj_prod = clean_max.split(".dev")[0]
             else:
                 proj_prod = self.bump_patch_version(clean_max)
+
+        # Smart Projection: Ensure projected production version doesn't exist on PyPI
+        while self.version_exists_on_pypi(proj_prod):
+            proj_prod = self.bump_patch_version(proj_prod)
+
         proj_dev = f"{proj_prod}.dev1"
         
         while self.version_exists_on_testpypi(proj_dev) or self.check_tag_exists(proj_dev):
@@ -809,6 +827,14 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         if not click.confirm("Do you agree with these versions and wish to proceed?"):
             console.print("[yellow]Release cancelled by user during version review.[/yellow]")
             return False
+
+        # Strict Validation Gate: Ensure the final version doesn't exist on PyPI
+        final_v = version or projection['projected_pypi']
+        if manager.version_exists_on_pypi(final_v):
+            console.print(f"\n[bold red]CRITICAL ERROR:[/bold red] Version {final_v} already exists on PyPI!")
+            console.print("[yellow]The release cannot proceed with a version that has already been published.[/yellow]")
+            return False
+
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
             progress.add_task(description="Performing pre-flight checks...", total=None)
             manager.check_dependencies()
