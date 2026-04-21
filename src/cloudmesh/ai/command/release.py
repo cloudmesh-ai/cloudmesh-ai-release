@@ -112,6 +112,9 @@ class ReleaseManager:
             self.package_name = package_name
             self.package_dir = Path(package_name).resolve()
             
+        # Extract organization from git remote
+        self.organization = self._extract_git_info().get("organization", "Unknown")
+            
         self.state_file = self.package_dir / ".release_state.json"
         self.log_file = None
         
@@ -147,6 +150,29 @@ class ReleaseManager:
                     return match.group(1)
         
         raise RuntimeError("Could not find package name in [project] section of pyproject.toml")
+
+    def _extract_git_info(self) -> Dict[str, str]:
+        """Extracts organization and repo name from the git remote URL."""
+        try:
+            result = self.run_command(["git", "remote", "get-url", "origin"])
+            url = result.stdout.strip()
+            # Handle both HTTPS and SSH URLs
+            # HTTPS: https://github.com/org/repo.git
+            # SSH: git@github.com:org/repo.git
+            if "github.com" in url:
+                if url.startswith("http"):
+                    parts = url.split("/")
+                    # parts[0]=https:, [1]='', [2]=github.com, [3]=org, [4]=repo.git
+                    org = parts[3] if len(parts) > 3 else "Unknown"
+                elif "@github.com:" in url:
+                    parts = url.split("@github.com:")[1].split("/")
+                    org = parts[0] if len(parts) > 0 else "Unknown"
+                else:
+                    org = "Unknown"
+                return {"organization": org}
+        except Exception:
+            pass
+        return {"organization": "Unknown"}
 
     def _log(self, message: str, level: str = "INFO"):
         """Logs messages to both the console and the release log file."""
@@ -266,6 +292,40 @@ class ReleaseManager:
         
         major, minor, patch = parts
         return f"{major}.{minor}.{int(patch) + 1}"
+
+    def get_current_version(self) -> str:
+        """Reads the version from the VERSION file."""
+        version_file = self.package_dir / "VERSION"
+        if not version_file.exists():
+            raise FileNotFoundError(f"VERSION file not found in {self.package_dir}")
+        return version_file.read_text().strip()
+
+    def bump_version(self, new_version: str):
+        """Bumps the version in the VERSION file."""
+        self._log(f"Bumping version to {new_version}...", "INFO")
+        version_file = self.package_dir / "VERSION"
+        version_file.write_text(new_version + "\n")
+        self.save_state()
+
+    def increment_prod_version(self) -> str:
+        """Increments the production patch version (x.y.z -> x.y.z+1)."""
+        version = self.get_current_version()
+        # Remove .devN if present to get the base stable version
+        base_version = version.split(".dev")[0]
+        return self.bump_patch_version(base_version)
+
+    def increment_dev_version(self) -> str:
+        """Increments the .devN suffix."""
+        version = self.get_current_version()
+        if ".dev" in version:
+            try:
+                base, dev_part = version.rsplit(".dev", 1)
+                return f"{base}.dev{int(dev_part) + 1}"
+            except (ValueError, IndexError):
+                pass
+        
+        # If not a dev version, start at .dev1 of the current version
+        return f"{version}.dev1"
 
     def get_next_dev_version(self) -> str:
         """
@@ -455,7 +515,8 @@ class ReleaseManager:
     def rollback(self):
         """Rolls back the local environment to the baseline state."""
         if not self.load_state():
-            raise RuntimeError("No release state found. Cannot rollback.")
+            self._log("No release state found. Nothing to roll back.", "WARNING")
+            return
 
         self._log("Starting rollback process...", "WARNING")
         
@@ -621,6 +682,41 @@ def check_cmd(packagename):
     # Implementation of check logic (e.g. using twine or requests to check PyPI)
     console.print("[green]Release verified on PyPI.[/green]")
 
+@release_group.command(name="version")
+@click.argument("action", required=False)
+@click.argument("packagename")
+def version_cmd(action, packagename):
+    """
+    Print current version status or increment version.
+
+    Actions:
+      dev+    Increment the .devN suffix
+      prod+   Increment the production patch version
+    """
+    manager = ReleaseManager(packagename)
+    try:
+        current_v = manager.get_current_version()
+
+        if action == "dev+":
+            next_v = manager.increment_dev_version()
+            manager.bump_version(next_v)
+            console.print(f"[green]Dev version updated: {current_v} -> {next_v}[/green]")
+        elif action == "prod+":
+            next_v = manager.increment_prod_version()
+            manager.bump_version(next_v)
+            console.print(f"[green]Prod version updated: {current_v} -> {next_v}[/green]")
+        else:
+            # Status mode
+            next_prod = manager.increment_prod_version()
+            next_dev = manager.increment_dev_version()
+
+            console.print(f"Current Version: [bold magenta]{current_v}[/bold magenta]")
+            console.print("\nSuggested Next Steps:")
+            console.print(f"  Prod Increment (prod+): [cyan]{next_prod}[/cyan]")
+            console.print(f"  Dev Increment (dev+):   [cyan]{next_dev}[/cyan]")
+    except Exception as e:
+        console.print(f"[red]Error managing version: {e}[/red]")
+
 
 def run_release_wizard(packagename, dry_run, version, skip_testpypi):
     """Core logic for the release wizard, reusable by 'now' and 'do'."""
@@ -714,6 +810,7 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         table = Table(title="Release Summary", box=box.ROUNDED)
         table.add_column("Item", style="cyan")
         table.add_column("Value", style="magenta")
+        table.add_row("Organization", manager.organization)
         table.add_row("Package", manager.package_name)
         table.add_row("Final Version", final_v)
         table.add_row("Log File", str(manager.log_file))
@@ -724,7 +821,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
 
     except Exception as e:
         console.print(f"\n[bold red]Release failed:[/bold red] {e}")
-        if not dry_run and click.confirm("Would you like to attempt a rollback?"):
+        # Only offer rollback if a baseline was actually created
+        if not dry_run and manager.state.get("baseline_commit") and click.confirm("Would you like to attempt a rollback?"):
             manager.rollback()
         return False
 
