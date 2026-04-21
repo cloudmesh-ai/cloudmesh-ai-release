@@ -889,14 +889,11 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
 
         # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
-            test_v = version or manager.get_next_dev_version()
+            # Use the pre-validated projected version from the review table
+            test_v = version or projection['projected_testpypi']
             
-            while True:
-                console.print(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?")
-                if not click.confirm("Proceed?", default=True):
-                    console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
-                    break
-                
+            console.print(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?")
+            if click.confirm("Proceed?", default=True):
                 try:
                     manager.create_tag(test_v)
                     manager.build_package()
@@ -906,19 +903,18 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                     if click.confirm("Did the TestPyPI installation and verification work?"):
                         manager._log("TestPyPI verification successful.", "INFO")
                         manager.mark_step_complete("testpypi")
-                        break
                     else:
                         if click.confirm("Verification failed. Rollback now?"):
                             manager.rollback()
                             return False
-                        break
                 except RuntimeError as e:
-                    if "already exists" in str(e).lower():
-                        console.print(f"[yellow]{e}[/yellow]")
-                        if click.confirm("The tag already exists. Would you like to try with an incremented version?"):
-                            test_v = manager.increment_dev_version(test_v)
-                            continue
-                    raise e
+                    console.print(f"[bold red]TestPyPI phase failed:[/bold red] {e}")
+                    if click.confirm("Would you like to attempt a rollback?"):
+                        manager.rollback()
+                        return False
+                    sys.exit(1)
+            else:
+                console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
 
         # 4. Final PyPI Phase (Production)
         console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
