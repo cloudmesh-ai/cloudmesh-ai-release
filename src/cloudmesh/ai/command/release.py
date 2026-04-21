@@ -873,7 +873,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
             test_v = version or manager.get_next_dev_version()
-            if click.confirm(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?"):
+            console.print(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?")
+            if click.confirm("Proceed?", default=True):
                 manager.create_tag(test_v)
                 manager.build_package()
                 manager.upload_to_pypi("testpypi")
@@ -890,7 +891,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
 
         # 4. Final PyPI Phase (Production)
-        if click.confirm(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?"):
+        console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
+        if click.confirm("Proceed?", default=True):
             # NEW ORDER: Tag -> Build -> Upload
             manager.create_tag(final_v)
             manager.build_package()
