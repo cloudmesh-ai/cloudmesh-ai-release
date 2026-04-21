@@ -406,7 +406,7 @@ class ReleaseManager:
                 parsed_versions.append((parsed, v, source))
         
         if not parsed_versions:
-            proj_prod = "0.1.0"
+            proj_prod = self.get_current_version()
         else:
             parsed_versions.sort(key=lambda x: x[0])
             _, max_v_str, _ = parsed_versions[-1]
@@ -460,7 +460,7 @@ class ReleaseManager:
                 next_v = self.bump_patch_version(latest)
                 return f"{next_v}.dev1"
             except RuntimeError:
-                return "0.1.0.dev1"
+                return f"{self.get_current_version()}.dev1"
 
     def init_logging(self, version: str):
         """Initializes the log file with the version number."""
