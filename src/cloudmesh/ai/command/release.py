@@ -15,6 +15,8 @@ import click
 import logging
 import re
 import urllib.request
+import questionary
+from prompt_toolkit.formatted_text import HTML
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -41,6 +43,7 @@ class ReleaseGroup(click.Group):
             "check",
             "now",
             "rollback",
+            "clean-tags",
         ]
 
 class ReleaseConfig:
@@ -1019,6 +1022,75 @@ def rollback_cmd(packagename, dry_run):
         console.print("[green]Rollback completed successfully.[/green]")
     except Exception as e:
         console.print(f"[bold red]Rollback failed:[/bold red] {e}")
+        sys.exit(1)
+
+@release_group.command(name="clean-tags")
+@click.option("--all", is_flag=True, help="Show all tags instead of just .dev tags.")
+def clean_tags_cmd(all):
+    """Interactively delete git tags (defaults to .dev tags)."""
+    # Use ReleaseManager(".") to reuse git command utilities
+    try:
+        manager = ReleaseManager(".")
+    except Exception:
+        # Fallback if not in a package directory, just use subprocess
+        manager = type("Dummy", (), {"run_command": lambda self, cmd, **kwargs: subprocess.run(cmd, capture_output=True, text=True, check=True), "_log": lambda self, msg, lvl="INFO": console.print(f"[{lvl}] {msg}")})()
+
+    try:
+        result = manager.run_command(["git", "tag", "-l"])
+        all_tags = result.stdout.splitlines()
+        
+        if not all_tags:
+            console.print("[yellow]No git tags found.[/yellow]")
+            return
+
+        # Filter for .dev tags by default
+        if not all:
+            tags_to_show = [t for t in all_tags if ".dev" in t]
+            if not tags_to_show:
+                console.print("[yellow]No .dev tags found. Use --all to see all tags.[/yellow]")
+                return
+            prompt_text = HTML("Select .dev tags to <red>delete</red>")
+        else:
+            tags_to_show = all_tags
+            prompt_text = HTML("Select tags to <red>delete</red>")
+
+        # Custom style to make the selected/highlighted item background red
+        custom_style = questionary.Style([
+            ('highlighted', 'fg:#ffffff bg:#ff0000'),
+            ('selected', 'fg:#ffffff bg:#ff0000'),
+        ])
+
+        selected_tags = questionary.checkbox(
+            prompt_text,
+            choices=tags_to_show,
+            style=custom_style
+        ).ask()
+
+        if not selected_tags:
+            console.print("[yellow]No tags selected for deletion.[/yellow]")
+            return
+
+        console.print("\n[bold cyan]Selected tags for deletion:[/bold cyan]")
+        for tag in selected_tags:
+            console.print(f"  - [red]{tag}[/red]")
+        console.print("")
+
+        if not click.confirm(f"Are you sure you want to delete these {len(selected_tags)} tags locally and remotely?"):
+            console.print("[yellow]Deletion cancelled.[/yellow]")
+            return
+
+        for tag in selected_tags:
+            console.print(f"Deleting tag [bold red]{tag}[/bold red]...")
+            try:
+                manager.run_command(["git", "tag", "-d", tag])
+                manager.run_command(["git", "push", "origin", "--delete", tag])
+            except Exception as e:
+                console.print(f"[red]Failed to delete tag {tag}: {e}[/red]")
+
+        console.print("\n[green]Tag cleanup completed.[/green]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error during tag cleanup:[/bold red] {e}")
         sys.exit(1)
 
 entry_point = release_group
