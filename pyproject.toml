@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloudmesh-ai-release"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Release automation tool for Cloudmesh AI packages"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,3 +17,13 @@ dependencies = [
 
 [project.entry-points."cloudmesh.ai.command"]
 release = "cloudmesh.ai.command.release:release_group"
+
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cloudmesh*"]

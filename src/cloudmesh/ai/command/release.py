@@ -331,7 +331,10 @@ class ReleaseManager:
         """Bumps the version in the VERSION file."""
         self._log(f"Bumping version to {new_version}...", "INFO")
         version_file = self.package_dir / "VERSION"
-        version_file.write_text(new_version + "\n")
+        if version_file.exists():
+            version_file.write_text(new_version + "\n")
+        else:
+            self._log(f"VERSION file not found in {self.package_dir}, skipping.", "WARNING")
         self.save_state()
 
     def increment_prod_version(self, base_version: Optional[str] = None) -> str:
