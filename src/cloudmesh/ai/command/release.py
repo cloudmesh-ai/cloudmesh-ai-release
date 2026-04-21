@@ -185,6 +185,11 @@ class ReleaseManager:
         
         return {"organization": "Unknown"}
 
+    def _strip_ansi(self, text: str) -> str:
+        """Removes ANSI escape sequences from text."""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])')
+        return ansi_escape.sub('', text)
+
     def _log(self, message: str, level: str = "INFO"):
         """Logs messages to both the console and the release log file."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -225,7 +230,9 @@ class ReleaseManager:
                 )
                 stdout_acc = []
                 for line in process.stdout:
-                    console.print(f"  [dim]{line.strip()}[/dim]")
+                    clean_line = self._strip_ansi(line).strip()
+                    if clean_line:
+                        console.print(f"  [dim]{clean_line}[/dim]")
                     stdout_acc.append(line)
                 
                 process.wait()
@@ -579,7 +586,7 @@ class ReleaseManager:
         self._log(f"Uploading to {repository}...", "INFO")
         dist_dir = self.package_dir / "dist"
         files = [str(f) for f in dist_dir.glob("*") if f.suffix in (".whl", ".gz")]
-        final_cmd = ["twine", "upload"]
+        final_cmd = ["twine", "upload", "--no-color"]
         if repository == "testpypi":
             final_cmd.extend(["--repository", "testpypi"])
         final_cmd.extend(files)
@@ -808,6 +815,7 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
             manager.check_git_clean()
         final_v = version or projection['projected_pypi']
         manager.init_logging(final_v)
+        initial_log_file = manager.log_file
         changelog = manager.get_changelog()
         console.print(Panel(changelog, title="Suggested Changelog", border_style="blue"))
         if click.confirm("\nStep 1: Create baseline git commit?"):
@@ -890,6 +898,9 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
             else:
                 console.print("[yellow]Final release cancelled.[/yellow]")
                 break
+        # Update log file path to match final version for the summary table
+        manager.log_file = manager.package_dir / f"release_{final_v}.log"
+        
         table = Table(title="Release Summary", box=box.ROUNDED)
         table.add_column("Item", style="cyan")
         table.add_column("Value", style="magenta")
@@ -900,6 +911,15 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         console.print("\n")
         console.print(table)
         console.print("\n")
+
+        # Rename the actual log file on disk to match the final version
+        if initial_log_file and initial_log_file.exists() and initial_log_file != manager.log_file:
+            try:
+                initial_log_file.rename(manager.log_file)
+                manager._log(f"Renamed log file from {initial_log_file.name} to {manager.log_file.name}", "INFO")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not rename log file: {e}[/yellow]")
+
         return True
     except Exception as e:
         console.print(f"\n[bold red]Release failed:[/bold red] {e}")
