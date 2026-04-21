@@ -607,7 +607,7 @@ class ReleaseManager:
         tag = f"v{version}"
         self._log(f"Creating git tag {tag}...", "INFO")
         self.run_command(["git", "tag", "-a", tag, "-m", f"Release {version}"])
-        self.run_command(["git", "push", "origin", "main", "--tags"])
+        self.run_command(["git", "push", "origin", tag])
         self.state["created_tag"] = tag
         self.save_state()
 
