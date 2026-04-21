@@ -428,8 +428,8 @@ class ReleaseManager:
         # TestPyPI must always have .devN at the end
         proj_dev = f"{proj_prod}.dev1"
         
-        # Ensure the projected TestPyPI version doesn't already exist
-        while self.version_exists_on_testpypi(proj_dev):
+        # Ensure the projected TestPyPI version doesn't already exist on TestPyPI OR as a Git tag
+        while self.version_exists_on_testpypi(proj_dev) or self.check_tag_exists(proj_dev):
             proj_dev = self.increment_dev_version(proj_dev)
         
         return {
