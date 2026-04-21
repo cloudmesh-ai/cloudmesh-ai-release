@@ -14,6 +14,7 @@ import subprocess
 import click
 import logging
 import re
+import urllib.request
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -152,26 +153,33 @@ class ReleaseManager:
         raise RuntimeError("Could not find package name in [project] section of pyproject.toml")
 
     def _extract_git_info(self) -> Dict[str, str]:
-        """Extracts organization and repo name from the git remote URL."""
+        """Extracts organization from the git remote URL."""
+        url = None
         try:
-            result = self.run_command(["git", "remote", "get-url", "origin"])
+            # Use git config to get the remote URL for origin
+            result = self.run_command(["git", "config", "--get", "remote.origin.url"])
             url = result.stdout.strip()
-            # Handle both HTTPS and SSH URLs
-            # HTTPS: https://github.com/org/repo.git
-            # SSH: git@github.com:org/repo.git
-            if "github.com" in url:
-                if url.startswith("http"):
-                    parts = url.split("/")
-                    # parts[0]=https:, [1]='', [2]=github.com, [3]=org, [4]=repo.git
-                    org = parts[3] if len(parts) > 3 else "Unknown"
-                elif "@github.com:" in url:
-                    parts = url.split("@github.com:")[1].split("/")
-                    org = parts[0] if len(parts) > 0 else "Unknown"
-                else:
-                    org = "Unknown"
-                return {"organization": org}
         except Exception:
-            pass
+            try:
+                # Fallback: get the first available remote
+                remotes_res = self.run_command(["git", "remote"])
+                remotes = remotes_res.stdout.splitlines()
+                if remotes:
+                    result = self.run_command(["git", "config", f"--get remote.{remotes[0]}.url"])
+                    url = result.stdout.strip()
+            except Exception:
+                pass
+
+        if url:
+            # Handle GitHub SSH: git@github.com:org/repo.git
+            if "github.com:" in url:
+                org = url.split("github.com:")[1].split("/")[0]
+                return {"organization": org}
+            # Handle GitHub HTTPS: https://github.com/org/repo.git
+            if "github.com/" in url:
+                org = url.split("github.com/")[1].split("/")[0]
+                return {"organization": org}
+        
         return {"organization": "Unknown"}
 
     def _log(self, message: str, level: str = "INFO"):
@@ -284,9 +292,28 @@ class ReleaseManager:
         # Check if it's a hex string of typical commit hash length (7-40)
         return bool(re.match(r'^[0-9a-f]{7,40}$', version.lower()))
 
+    def _parse_version(self, version: str) -> Optional[tuple]:
+        """Parses a version string into a tuple of integers for comparison."""
+        if not version or version == "Not found" or version == "No tag":
+            return None
+        
+        # Remove 'v' prefix and .devN suffix for base comparison
+        v = version[1:] if version.startswith("v") else version
+        v = v.split(".dev")[0]
+        
+        try:
+            return tuple(map(int, v.split('.')))
+        except (ValueError, AttributeError):
+            return None
+
     def bump_patch_version(self, version: str) -> str:
         """Increments the patch version of a semantic version string (x.y.z -> x.y.z+1)."""
-        parts = version.split('.')
+        # Ensure we are working with the base version (no .dev)
+        base_version = version.split(".dev")[0]
+        if base_version.startswith("v"):
+            base_version = base_version[1:]
+            
+        parts = base_version.split('.')
         if len(parts) != 3:
             raise RuntimeError(f"Invalid semantic version for bumping: {version}. Expected x.y.z")
         
@@ -307,25 +334,95 @@ class ReleaseManager:
         version_file.write_text(new_version + "\n")
         self.save_state()
 
-    def increment_prod_version(self) -> str:
+    def increment_prod_version(self, base_version: Optional[str] = None) -> str:
         """Increments the production patch version (x.y.z -> x.y.z+1)."""
-        version = self.get_current_version()
-        # Remove .devN if present to get the base stable version
-        base_version = version.split(".dev")[0]
-        return self.bump_patch_version(base_version)
+        version = base_version or self.get_current_version()
+        return self.bump_patch_version(version)
 
-    def increment_dev_version(self) -> str:
+    def increment_dev_version(self, base_version: Optional[str] = None) -> str:
         """Increments the .devN suffix."""
-        version = self.get_current_version()
-        if ".dev" in version:
+        version = base_version or self.get_current_version()
+        
+        # Remove 'v' prefix if present
+        v_clean = version[1:] if version.startswith("v") else version
+        
+        if ".dev" in v_clean:
             try:
-                base, dev_part = version.rsplit(".dev", 1)
+                base, dev_part = v_clean.rsplit(".dev", 1)
                 return f"{base}.dev{int(dev_part) + 1}"
             except (ValueError, IndexError):
                 pass
         
         # If not a dev version, start at .dev1 of the current version
-        return f"{version}.dev1"
+        # If it's a stable version, we usually want the next dev to be based on the NEXT stable
+        # but the user said "based on the largest value", so we'll use the base.
+        return f"{v_clean}.dev1"
+
+    def get_pypi_version(self, repository: str = "pypi") -> str:
+        """Fetches the current version of the package from PyPI or TestPyPI."""
+        base_url = "https://pypi.org/pypi" if repository == "pypi" else "https://test.pypi.org/pypi"
+        url = f"{base_url}/{self.package_name}/json"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                return data["info"]["version"]
+        except Exception:
+            return "Not found"
+
+    def get_latest_git_tag(self) -> str:
+        """Gets the latest git tag."""
+        try:
+            result = self.run_command(["git", "describe", "--tags", "--abbrev=0"])
+            tag = result.stdout.strip()
+            return tag[1:] if tag.startswith("v") else tag
+        except Exception:
+            return "No tag"
+
+    def get_version_projection(self) -> Dict[str, str]:
+        """
+        Returns a comprehensive version projection based on the maximum current version.
+        Logic:
+        1. Find the largest x.x.x among PyPI and Git tags.
+        2. The new base version is that largest x.x.x + 1.
+        3. projected_pypi = new base version.
+        4. projected_testpypi = new base version + .dev1.
+        """
+        current_file = self.get_current_version()
+        latest_tag = self.get_latest_git_tag()
+        pypi_v = self.get_pypi_version("pypi")
+        testpypi_v = self.get_pypi_version("testpypi")
+        
+        # Consider only PyPI and Git tags for the largest x.x.x
+        sources = [("pypi", pypi_v), ("git", latest_tag)]
+        parsed_versions = []
+        for source, v in sources:
+            parsed = self._parse_version(v)
+            if parsed:
+                parsed_versions.append((parsed, v, source))
+        
+        if not parsed_versions:
+            max_base = "0.1.0"
+        else:
+            # Sort by the parsed tuple and take the last one
+            parsed_versions.sort(key=lambda x: x[0])
+            _, max_v_str, _ = parsed_versions[-1]
+            # Clean to pure x.y.z
+            max_base = max_v_str[1:] if max_v_str.startswith("v") else max_v_str
+            max_base = max_base.split(".dev")[0]
+
+        # New base is always max_base + 1
+        proj_prod = self.bump_patch_version(max_base)
+        # TestPyPI must always have .devN at the end
+        proj_dev = f"{proj_prod}.dev1"
+        
+        return {
+            "git_tag": latest_tag,
+            "github_version": current_file,
+            "pypi_version": pypi_v,
+            "testpypi_version": testpypi_v,
+            "projected_pypi": proj_prod,
+            "projected_testpypi": proj_dev
+        }
 
     def get_next_dev_version(self) -> str:
         """
@@ -723,6 +820,28 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     
     try:
+        # 0. Version Review
+        projection = manager.get_version_projection()
+        review_table = Table(title="Version Review", box=box.ROUNDED)
+        review_table.add_column("Metric", style="cyan")
+        review_table.add_column("Value", style="magenta")
+        review_table.add_column("Projected", style="green")
+        
+        review_table.add_row("Package", manager.package_name, "")
+        review_table.add_row("Organization", manager.organization, "")
+        review_table.add_row("Git Tag", projection["git_tag"], f"v{version or projection['projected_pypi']}")
+        review_table.add_row("VERSION", projection["github_version"], "")
+        review_table.add_row("PyPI", projection["pypi_version"], f"{version or projection['projected_pypi']}")
+        review_table.add_row("TestPyPI", projection["testpypi_version"], projection['projected_testpypi'])
+        
+        console.print("\n")
+        console.print(review_table)
+        console.print("\n")
+        
+        if not click.confirm("Do you agree with these versions and wish to proceed?"):
+            console.print("[yellow]Release cancelled by user during version review.[/yellow]")
+            return False
+
         # 1. Pre-flight
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
             progress.add_task(description="Performing pre-flight checks...", total=None)
@@ -893,6 +1012,55 @@ def plan_do(dry_run, version, skip_testpypi):
                 console.print(f"[yellow]Resuming release from {last_pkg}...[/yellow]")
             except ValueError:
                 console.print("[red]Last package not found in current plan. Starting from beginning.[/red]")
+
+    # Version Review for all packages
+    console.print(Panel(f"Preparing version review for {len(packages)} packages...", style="bold blue"))
+    
+    # Collect projections for all packages first
+    all_projections = {}
+    for pkg in packages:
+        try:
+            pkg_manager = ReleaseManager(pkg)
+            proj = pkg_manager.get_version_projection()
+            proj["organization"] = pkg_manager.organization
+            all_projections[pkg] = proj
+        except Exception as e:
+            all_projections[pkg] = {"error": str(e)}
+
+    review_table = Table(title="Bulk Release Version Review", box=box.ROUNDED)
+    review_table.add_column("Package", style="cyan")
+    review_table.add_column("Organization", style="magenta")
+    review_table.add_column("Current Tag", style="magenta")
+    review_table.add_column("Projected Tag", style="green")
+    review_table.add_column("VERSION", style="magenta")
+    review_table.add_column("Projected PyPI", style="green")
+    review_table.add_column("Current TestPyPI", style="magenta")
+    review_table.add_column("Projected TestPyPI", style="green")
+    
+    for pkg in packages:
+        proj = all_projections.get(pkg, {})
+        if "error" in proj:
+            review_table.add_row(pkg, "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]")
+            continue
+            
+        review_table.add_row(
+            pkg,
+            proj.get("organization", "N/A"),
+            proj.get("git_tag", "N/A"),
+            f"[green]v{version or proj.get('projected_pypi', 'N/A')}[/green]",
+            proj.get("github_version", "N/A"),
+            f"[green]{version or proj.get('projected_pypi', 'N/A')}[/green]",
+            proj.get("testpypi_version", "N/A"),
+            f"[green]{proj.get('projected_testpypi', 'N/A')}[/green]"
+        )
+            
+    console.print("\n")
+    console.print(review_table)
+    console.print("\n")
+    
+    if not click.confirm("Do you agree with all projected versions and wish to proceed with the bulk release?"):
+        console.print("[yellow]Bulk release cancelled by user during version review.[/yellow]")
+        return
 
     console.print(Panel(f"Starting bulk release for {len(packages)} packages...", style="bold blue"))
     
