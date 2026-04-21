@@ -838,36 +838,58 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                         return False
             else:
                 console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
-        console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
-        if click.confirm("Proceed?", default=True):
-            manager.bump_version(final_v)
-            manager.create_tag(final_v)
-            manager.build_package()
-            console.print(Panel(
-                f"CRITICAL: You are about to upload version {final_v} to the official PyPI server.\n"
-                "This action cannot be undone. Please ensure all tests have passed.",
-                title="Final Warning",
-                border_style="red",
-                box=box.DOUBLE
-            ))
-            if click.confirm("Are you absolutely sure you want to upload to PyPI?", default=False):
-                if click.confirm("LAST CHANCE: Confirm upload to PyPI?", default=False):
-                    manager.upload_to_pypi("pypi")
-                    manager._log("Official PyPI release complete!", "INFO")
-                    try:
+        production_complete = False
+        while not production_complete:
+            console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
+            if click.confirm("Proceed?", default=True):
+                try:
+                    manager.bump_version(final_v)
+                    manager.create_tag(final_v)
+                    manager.build_package()
+                    console.print(Panel(
+                        f"CRITICAL: You are about to upload version {final_v} to the official PyPI server.\n"
+                        "This action cannot be undone. Please ensure all tests have passed.",
+                        title="Final Warning",
+                        border_style="red",
+                        box=box.DOUBLE
+                    ))
+                    if click.confirm("Are you absolutely sure you want to upload to PyPI?", default=False):
+                        if click.confirm("LAST CHANCE: Confirm upload to PyPI?", default=False):
+                            manager.upload_to_pypi("pypi")
+                            manager._log("Official PyPI release complete!", "INFO")
+                            try:
+                                next_v = manager.bump_patch_version(final_v)
+                                manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
+                                manager.create_tag(next_v)
+                                manager.create_tag(f"{next_v}.dev1")
+                                manager._log(f"Next release target set to v{next_v} and dev version to v{next_v}.dev1", "INFO")
+                            except Exception as e:
+                                manager._log(f"Post-release tagging failed: {e}", "WARNING")
+                            production_complete = True
+                        else:
+                            console.print("[red]Upload cancelled.[/red]")
+                            break
+                    else:
+                        console.print("[red]Upload cancelled.[/red]")
+                        break
+                except RuntimeError as e:
+                    if "already exists" in str(e) and "Git tag" in str(e):
                         next_v = manager.bump_patch_version(final_v)
-                        manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
-                        manager.create_tag(next_v)
-                        manager.create_tag(f"{next_v}.dev1")
-                        manager._log(f"Next release target set to v{next_v} and dev version to v{next_v}.dev1", "INFO")
-                    except Exception as e:
-                        manager._log(f"Post-release tagging failed: {e}", "WARNING")
-                else:
-                    console.print("[red]Upload cancelled.[/red]")
+                        console.print(f"\n[bold yellow]Conflict:[/bold yellow] {e}")
+                        if click.confirm(f"Would you like to try with version {next_v} instead?"):
+                            final_v = next_v
+                            continue
+                        else:
+                            if click.confirm("Do you want to terminate this process?"):
+                                console.print("[yellow]Process terminated by user.[/yellow]")
+                                return False
+                            else:
+                                console.print("[yellow]Returning to production phase start...[/yellow]")
+                    else:
+                        raise e
             else:
-                console.print("[red]Upload cancelled.[/red]")
-        else:
-            console.print("[yellow]Final release cancelled.[/yellow]")
+                console.print("[yellow]Final release cancelled.[/yellow]")
+                break
         table = Table(title="Release Summary", box=box.ROUNDED)
         table.add_column("Item", style="cyan")
         table.add_column("Value", style="magenta")
