@@ -484,10 +484,22 @@ class ReleaseManager:
             
         self._log("All dependencies verified.", "INFO")
 
-    def check_git_clean(self):
-        """Ensures the git working directory is clean."""
+    def check_git_clean(self, allowed_version: Optional[str] = None):
+        """Ensures the git working directory is clean, optionally allowing VERSION to match allowed_version."""
         result = self.run_command(["git", "status", "--porcelain"])
-        if result.stdout.strip():
+        stdout = result.stdout.strip()
+        
+        if stdout:
+            # Check if the only change is the VERSION file
+            lines = stdout.splitlines()
+            version_file_only = len(lines) == 1 and "VERSION" in lines[0]
+            
+            if version_file_only and allowed_version:
+                current_v = self.get_current_version()
+                if current_v == allowed_version:
+                    self._log(f"Git directory has modified VERSION matching projected version {allowed_version}. Proceeding...", "INFO")
+                    return
+
             status_result = self.run_command(["git", "status"])
             status_output = status_result.stdout
             raise RuntimeError(
