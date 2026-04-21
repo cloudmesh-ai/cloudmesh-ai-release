@@ -725,8 +725,8 @@ def pypi_cmd(packagename, dry_run, version):
             border_style="red",
             box=box.DOUBLE
         ))
-        if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
-            if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
+        if click.confirm("Are you absolutely sure you want to upload to PyPI?", default=False):
+            if click.confirm("LAST CHANCE: Confirm upload to PyPI?", default=False):
                 manager.upload_to_pypi("pypi")
                 manager._log("Official PyPI release complete!", "INFO")
                 try:
@@ -847,8 +847,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 border_style="red",
                 box=box.DOUBLE
             ))
-            if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
-                if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
+            if click.confirm("Are you absolutely sure you want to upload to PyPI?", default=False):
+                if click.confirm("LAST CHANCE: Confirm upload to PyPI?", default=False):
                     manager.upload_to_pypi("pypi")
                     manager._log("Official PyPI release complete!", "INFO")
                     try:
