@@ -539,6 +539,13 @@ class ReleaseManager:
     def build_package(self):
         """Builds the package using the build module and verifies artifacts."""
         self._log("Building package artifacts...", "INFO")
+        
+        # Clear dist directory to avoid confusion with old artifacts
+        dist_dir = self.package_dir / "dist"
+        if dist_dir.exists():
+            self._log("Cleaning up old artifacts in dist directory...", "DEBUG")
+            shutil.rmtree(dist_dir)
+
         is_dry = self.dry_run
         if is_dry:
             self._log("[DRY-RUN] Verifying build process by executing build...", "DEBUG")
