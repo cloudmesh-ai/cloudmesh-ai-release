@@ -895,6 +895,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
             console.print(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?")
             if click.confirm("Proceed?", default=True):
                 try:
+                    # Update VERSION file so the build artifact has the correct version
+                    manager.bump_version(test_v)
                     manager.create_tag(test_v)
                     manager.build_package()
                     manager.upload_to_pypi("testpypi")
@@ -919,6 +921,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         # 4. Final PyPI Phase (Production)
         console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
         if click.confirm("Proceed?", default=True):
+            # Update VERSION file so the build artifact has the correct version
+            manager.bump_version(final_v)
             # NEW ORDER: Tag -> Build -> Upload
             manager.create_tag(final_v)
             manager.build_package()
