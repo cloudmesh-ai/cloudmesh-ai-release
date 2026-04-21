@@ -586,7 +586,7 @@ class ReleaseManager:
         self._log(f"Uploading to {repository}...", "INFO")
         dist_dir = self.package_dir / "dist"
         files = [str(f) for f in dist_dir.glob("*") if f.suffix in (".whl", ".gz")]
-        final_cmd = ["twine", "upload", "--no-color"]
+        final_cmd = ["twine", "--no-color", "upload"]
         if repository == "testpypi":
             final_cmd.extend(["--repository", "testpypi"])
         final_cmd.extend(files)
