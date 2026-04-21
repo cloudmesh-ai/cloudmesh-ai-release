@@ -108,23 +108,41 @@ cmc release rollback cloudmesh-ai-cmc
 
 ------------------------------------------------------------------------
 
-## Version Management
+## Versioning Lifecycle
 
-This tool leverages `setuptools-scm` for dynamic versioning, ensuring that the version of the released package is always perfectly synchronized with the Git history.
+This tool leverages `setuptools-scm` and Git tags to automate versioning, ensuring that the package version is always synchronized with the repository history.
 
 ### How it Works
 
-Instead of hardcoding a version string in `pyproject.toml` or `setup.py`, the version is derived from the most recent Git tag.
+The tool follows a strict versioning cycle to prevent collisions between TestPyPI and production releases:
 
-1.  **Tag as Version**: When the tool creates a Git tag (e.g., `v1.2.3`), `setuptools-scm` detects this tag during the `make build` phase.
-2.  **Automatic Injection**: The version `1.2.3` is automatically injected into the package metadata.
-3.  **Single Source of Truth**: The Git tag is the only place where the version is defined, eliminating the risk of "version mismatch" between the code and the PyPI upload.
+1.  **The Source of Truth**: The most recent Git tag (e.g., `v1.2.3`) defines the last stable release.
+2.  **The TestPyPI Cycle (`.dev` versions)**: 
+    To avoid uploading a version to TestPyPI that might already exist on PyPI, the tool automatically calculates a development version for the *next* release. 
+    - If the last tag was `v1.2.3`, the tool suggests `1.2.4.dev1` for TestPyPI.
+    - This ensures that TestPyPI artifacts are always distinct from production artifacts.
+3.  **The Production Cycle**: 
+    Once the TestPyPI version is verified, the tool creates the official stable tag (e.g., `v1.2.4`) and uploads it to PyPI.
+4.  **Automatic Baseline Bump**: 
+    Immediately after a successful PyPI release, the tool automatically bumps the patch version and creates a new baseline tag for the next development cycle, keeping the repository ready for the next set of changes.
+
+### Initial Setup (Bootstrapping)
+
+If your repository has no Git tags, the tool cannot determine the next version. You can set the original version in two ways:
+
+- **Automatic**: Run `cmc release now`. The tool will detect the missing tags and prompt you to enter the first development version (e.g., `0.1.1.dev1`).
+- **Manual**: Create a tag manually to match your current PyPI release:
+  ```bash
+  git tag -a v0.1.0 -m "Original release version"
+  git push origin v0.1.0
+  ```
 
 ### Overriding the Version
 
-While automatic tagging is recommended, you can force a specific version using the `--version` flag: `cmc release now <package> --version 1.2.4`
+While the automated lifecycle is recommended, you can force a specific target version using the `--version` flag:
+`cmc release now <package> --version 1.2.4`
 
-In this case, the tool will use the provided version for the build and create the corresponding Git tag to maintain consistency.
+In this case, the tool will bypass the automatic `.dev` calculation and use the provided version for both TestPyPI and PyPI.
 
 ------------------------------------------------------------------------
 
@@ -134,13 +152,7 @@ The release process is designed as a safety-first pipeline. It ensures that no b
 
 ### Workflow Diagram
 
-``` mermaid
-graph TD;
-    A-->B;
-    A-->C;
-    B-->D;
-    C-->D;
-```
+![Release Workflow](./docs/workflow.svg)
 
 ``` mermaid
 graph LR
@@ -184,11 +196,22 @@ To ensure a 100% recovery path, the tool: 1. Captures the current `HEAD` commit 
 
 #### Phase 3: TestPyPI Validation (The Sandbox)
 
-To prevent "broken" releases from hitting production: 1. **Build**: Executes `python -m build` to create `.whl` and `.tar.gz` artifacts. 2. **Upload**: Uses `twine` to upload to the TestPyPI repository. 3. **Verification**: The wizard pauses and asks the user to manually install the package from TestPyPI to verify it works. **This is a critical gate; the process will not proceed to production without user confirmation.**
+To prevent "broken" releases from hitting production:
+1. **Version Calculation**: The tool automatically determines the next development version (e.g., `1.2.4.dev1`) based on the latest Git tag.
+2. **Build**: Executes `python -m build` to create `.whl` and `.tar.gz` artifacts using this `.dev` version.
+3. **Upload**: Uses `twine` to upload to the TestPyPI repository.
+4. **Verification**: The wizard pauses and asks the user to manually install the package from TestPyPI to verify it works. **This is a critical gate; the process will not proceed to production without user confirmation.**
 
 #### Phase 4: Production Release
 
-Once validated: 1. **Git Tagging**: Creates an annotated tag (e.g., `v1.0.0`) and pushes it to `origin main`. - *Command:* `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z` 2. **Build**: Re-builds the artifacts for the final version to ensure the tag is included. - *Command:* `make build` (or `python -m build`) 3. **Double-Confirmation**: Displays a high-visibility red warning panel. The user must confirm **twice** before the upload proceeds. 4. **PyPI Upload**: Uploads the final artifacts to the official PyPI server. 5. **Final Validation**: A critical final check to ensure the production package is installable and functional. - *Action:* Perform a fresh `pip install` of the released version in a clean environment and run the test suite (e.g., `pytest`).
+Once validated:
+1. **Git Tagging**: Creates the official annotated stable tag (e.g., `v1.2.4`) and pushes it to `origin main`.
+2. **Build**: Re-builds the artifacts for the final stable version to ensure the tag is included.
+3. **Double-Confirmation**: Displays a high-visibility red warning panel. The user must confirm **twice** before the upload proceeds.
+4. **PyPI Upload**: Uploads the final artifacts to the official PyPI server.
+5. **Post-Release Baseline**: The tool automatically bumps the patch version and creates a new baseline tag to prepare the repository for the next development cycle.
+6. **Final Validation**: A critical final check to ensure the production package is installable and functional.
+   - *Action:* Perform a fresh `pip install` of the released version in a clean environment and run the test suite (e.g., `pytest`).
 
 ------------------------------------------------------------------------
 

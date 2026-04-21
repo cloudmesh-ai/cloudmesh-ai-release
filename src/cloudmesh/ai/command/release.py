@@ -354,8 +354,6 @@ class ReleaseManager:
                 pass
         
         # If not a dev version, start at .dev1 of the current version
-        # If it's a stable version, we usually want the next dev to be based on the NEXT stable
-        # but the user said "based on the largest value", so we'll use the base.
         return f"{v_clean}.dev1"
 
     def get_pypi_version(self, repository: str = "pypi") -> str:
@@ -394,18 +392,12 @@ class ReleaseManager:
     def get_version_projection(self) -> Dict[str, str]:
         """
         Returns a comprehensive version projection based on the maximum current version.
-        Logic:
-        1. Find the largest x.x.x among PyPI and Git tags.
-        2. The new base version is that largest x.x.x + 1.
-        3. projected_pypi = new base version.
-        4. projected_testpypi = new base version + .dev1.
         """
         current_file = self.get_current_version()
         latest_tag = self.get_latest_git_tag()
         pypi_v = self.get_pypi_version("pypi")
         testpypi_v = self.get_pypi_version("testpypi")
         
-        # Consider only PyPI and Git tags for the largest x.x.x
         sources = [("pypi", pypi_v), ("git", latest_tag)]
         parsed_versions = []
         for source, v in sources:
@@ -416,19 +408,14 @@ class ReleaseManager:
         if not parsed_versions:
             max_base = "0.1.0"
         else:
-            # Sort by the parsed tuple and take the last one
             parsed_versions.sort(key=lambda x: x[0])
             _, max_v_str, _ = parsed_versions[-1]
-            # Clean to pure x.y.z
             max_base = max_v_str[1:] if max_v_str.startswith("v") else max_v_str
             max_base = max_base.split(".dev")[0]
 
-        # New base is always max_base + 1
         proj_prod = self.bump_patch_version(max_base)
-        # TestPyPI must always have .devN at the end
         proj_dev = f"{proj_prod}.dev1"
         
-        # Ensure the projected TestPyPI version doesn't already exist on TestPyPI OR as a Git tag
         while self.version_exists_on_testpypi(proj_dev) or self.check_tag_exists(proj_dev):
             proj_dev = self.increment_dev_version(proj_dev)
         
@@ -442,34 +429,25 @@ class ReleaseManager:
         }
 
     def get_next_dev_version(self) -> str:
-        """
-        Calculates the next .devN version based on existing git tags.
-        - If latest is vX.Y.Z.devN -> vX.Y.Z.dev(N+1)
-        - If latest is vX.Y.Z -> vX.Y.(Z+1).dev1
-        - If no tags -> v0.1.0.dev1
-        """
+        """Calculates the next .devN version based on existing git tags."""
         try:
             tags_res = self.run_command(["git", "tag", "-l"])
             tags = tags_res.stdout.splitlines()
         except Exception:
             tags = []
 
-        # Filter for tags starting with 'v' and containing digits
         semver_tags = []
         for t in tags:
             if t.startswith('v') and any(char.isdigit() for char in t):
-                semver_tags.append(t[1:]) # Remove 'v'
+                semver_tags.append(t[1:])
 
         if not semver_tags:
-            return "0.1.0.dev1"
+            return None
 
-        # Sort tags to find the latest (simple sort works for most semver)
-        # For a more robust solution, we'd use packaging.version
         semver_tags.sort(reverse=True)
         latest = semver_tags[0]
 
         if ".dev" in latest:
-            # Case: vX.Y.Z.devN
             base, dev_part = latest.rsplit(".dev", 1)
             try:
                 next_n = int(dev_part) + 1
@@ -477,7 +455,6 @@ class ReleaseManager:
             except ValueError:
                 return f"{base}.dev1"
         else:
-            # Case: vX.Y.Z
             try:
                 next_v = self.bump_patch_version(latest)
                 return f"{next_v}.dev1"
@@ -499,7 +476,6 @@ class ReleaseManager:
             if shutil.which(dep) is None:
                 raise RuntimeError(f"Required dependency '{dep}' not found in PATH.")
         
-        # Check if 'build' module is installed
         try:
             self.run_command(["python", "-m", "build", "--help"])
         except Exception:
@@ -527,24 +503,16 @@ class ReleaseManager:
         except subprocess.CalledProcessError:
             return False
 
-    # VERSION file methods removed in favor of setuptools-scm
-
     def create_baseline(self):
         """Creates a baseline git commit of the current state."""
         self._log("Creating baseline git commit...", "INFO")
-        # Get current commit hash
         commit = self.run_command(["git", "rev-parse", "HEAD"]).stdout.strip()
         self.state["baseline_commit"] = commit
-        
-        # Determine version for commit message
         version = self.target_version or self.get_scm_version() or "dev"
-        
-        # Commit current changes
         self.run_command(["git", "add", "."])
         try:
             self.run_command(["git", "commit", "-m", f"Baseline for release {version}"])
         except subprocess.CalledProcessError as e:
-            # Handle case where there is nothing to commit
             error_msg = (e.stdout or "") + (e.stderr or "")
             if "nothing to commit" in error_msg.lower():
                 self._log("No changes to commit for baseline.", "INFO")
@@ -555,13 +523,9 @@ class ReleaseManager:
     def build_package(self):
         """Builds the package using the build module and verifies artifacts."""
         self._log("Building package artifacts...", "INFO")
-        
-        # In dry-run, we still want to verify that the build process works
-        # so we execute the build but we will log it as a verification step.
         is_dry = self.dry_run
         if is_dry:
             self._log("[DRY-RUN] Verifying build process by executing build...", "DEBUG")
-            # We use a direct subprocess call to bypass the dry_run simulation in run_command
             try:
                 subprocess.run([sys.executable, "-m", "build"], cwd=self.package_dir, check=True, capture_output=True)
             except subprocess.CalledProcessError as e:
@@ -569,7 +533,6 @@ class ReleaseManager:
         else:
             self.run_command([sys.executable, "-m", "build"], stream=True)
 
-        # Verify artifacts
         dist_dir = self.package_dir / "dist"
         if not dist_dir.exists():
             raise RuntimeError("Build completed but 'dist' directory was not created.")
@@ -588,22 +551,18 @@ class ReleaseManager:
     def upload_to_pypi(self, repository: str = "pypi"):
         """Uploads the package to PyPI or TestPyPI."""
         self._log(f"Uploading to {repository}...", "INFO")
-        
         dist_dir = self.package_dir / "dist"
         files = [str(f) for f in dist_dir.glob("*") if f.suffix in (".whl", ".gz")]
-        
         final_cmd = ["twine", "upload"]
         if repository == "testpypi":
             final_cmd.extend(["--repository", "testpypi"])
         final_cmd.extend(files)
-        
         self.run_command(final_cmd, stream=True)
 
     def create_tag(self, version: str):
         """Creates and pushes a git tag."""
         if self.check_tag_exists(version):
             raise RuntimeError(f"Git tag v{version} already exists. Please check the version or delete the tag.")
-            
         tag = f"v{version}"
         self._log(f"Creating git tag {tag}...", "INFO")
         self.run_command(["git", "tag", "-a", tag, "-m", f"Release {version}"])
@@ -614,14 +573,11 @@ class ReleaseManager:
     def get_changelog(self) -> str:
         """Generates a summary of commits since the last tag."""
         try:
-            # Get the last tag
             last_tag_res = self.run_command(["git", "describe", "--tags", "--abbrev=0"])
             last_tag = last_tag_res.stdout.strip()
             range_str = f"{last_tag}..HEAD"
         except Exception:
-            # No tags found, get all commits
             range_str = "HEAD"
-
         self._log(f"Generating changelog for {range_str}...", "DEBUG")
         result = self.run_command(["git", "log", range_str, "--oneline", "--no-merges"])
         return result.stdout.strip() or "No new commits found."
@@ -631,33 +587,23 @@ class ReleaseManager:
         if not self.load_state():
             self._log("No release state found. Nothing to roll back.", "WARNING")
             return
-
         self._log("Starting rollback process...", "WARNING")
-        
-        # 1. Delete tag
         tag = self.state.get("created_tag")
         if tag:
             self._log(f"Deleting tag {tag}...", "INFO")
             self.run_command(["git", "tag", "-d", tag])
-            # Attempt to delete remote tag
             try:
                 self.run_command(["git", "push", "origin", "--delete", tag])
             except Exception:
                 self._log(f"Could not delete remote tag {tag}, you may need to do it manually.", "WARNING")
-
-        # 2. Reset Git
         baseline = self.state.get("baseline_commit")
         if baseline:
             self._log(f"Resetting git to baseline {baseline}...", "INFO")
             self.run_command(["git", "reset", "--hard", baseline])
-
-        # 3. Cleanup dist
         dist_dir = self.package_dir / "dist"
         if dist_dir.exists():
             shutil.rmtree(dist_dir)
             self._log("Removed dist directory.", "INFO")
-
-        # 4. Remove state file
         self.state_file.unlink()
         self._log("Rollback complete. Local environment restored.", "INFO")
 
@@ -665,9 +611,6 @@ class ReleaseManager:
 def release_group():
     """
     Release automation tool for Cloudmesh AI packages.
-
-    Order:
-      1. validate -> 2. baseline -> 3. testpypi -> 4. pypi -> 5. check
     """
     pass
 
@@ -718,16 +661,14 @@ def testpypi_cmd(packagename, dry_run, version):
     """Perform TestPyPI validation phase."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
     try:
-        # Determine the dev version for TestPyPI
         test_v = version or manager.get_next_dev_version()
+        if not test_v:
+            console.print("[yellow]No git tags found to determine the next dev version.[/yellow]")
+            test_v = click.prompt("Please enter the next dev version (e.g., 0.1.1.dev1)")
         manager.init_logging(test_v)
-        
-        # Create the dev tag before uploading
         manager.create_tag(test_v)
-        
         manager.build_package()
         manager.upload_to_pypi("testpypi")
-        
         if click.confirm(f"Please verify the installation of version {test_v} on TestPyPI. Did it work?"):
             manager.mark_step_complete("testpypi")
             console.print("[green]TestPyPI validation successful![/green]")
@@ -749,15 +690,11 @@ def pypi_cmd(packagename, dry_run, version):
     try:
         current_v = manager.get_scm_version()
         final_v = version or current_v
-        
-        # If no version provided and SCM returns a hash, prompt for a semantic version
         if not version and manager.is_commit_hash(final_v):
             console.print(f"[yellow]Warning: SCM version is a commit hash ({final_v}).[/yellow]")
             final_v = click.prompt("Please enter a starting semantic version (e.g., 0.1.0)")
-        
         manager.init_logging(final_v)
         manager.build_package()
-        
         console.print(Panel(
             f"CRITICAL: You are about to upload version {final_v} to the official PyPI server.\n"
             "This action cannot be undone.",
@@ -765,13 +702,10 @@ def pypi_cmd(packagename, dry_run, version):
             border_style="red",
             box=box.DOUBLE
         ))
-        
         if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
             if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                 manager.upload_to_pypi("pypi")
                 manager._log("Official PyPI release complete!", "INFO")
-                
-                # Post-release: Bump version and set up next dev cycle
                 try:
                     next_v = manager.bump_patch_version(final_v)
                     manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
@@ -793,24 +727,16 @@ def pypi_cmd(packagename, dry_run, version):
 def check_cmd(packagename):
     """Check the status of the release on PyPI."""
     console.print(f"Checking release status for {packagename} on PyPI...")
-    # Implementation of check logic (e.g. using twine or requests to check PyPI)
     console.print("[green]Release verified on PyPI.[/green]")
 
 @release_group.command(name="version")
 @click.argument("action", required=False)
 @click.argument("packagename")
 def version_cmd(action, packagename):
-    """
-    Print current version status or increment version.
-
-    Actions:
-      dev+    Increment the .devN suffix
-      prod+   Increment the production patch version
-    """
+    """Print current version status or increment version."""
     manager = ReleaseManager(packagename)
     try:
         current_v = manager.get_current_version()
-
         if action == "dev+":
             next_v = manager.increment_dev_version()
             manager.bump_version(next_v)
@@ -820,10 +746,8 @@ def version_cmd(action, packagename):
             manager.bump_version(next_v)
             console.print(f"[green]Prod version updated: {current_v} -> {next_v}[/green]")
         else:
-            # Status mode
             next_prod = manager.increment_prod_version()
             next_dev = manager.increment_dev_version()
-
             console.print(f"Current Version: [bold magenta]{current_v}[/bold magenta]")
             console.print("\nSuggested Next Steps:")
             console.print(f"  Prod Increment (prod+): [cyan]{next_prod}[/cyan]")
@@ -831,76 +755,48 @@ def version_cmd(action, packagename):
     except Exception as e:
         console.print(f"[red]Error managing version: {e}[/red]")
 
-
 def run_release_wizard(packagename, dry_run, version, skip_testpypi):
     """Core logic for the release wizard, reusable by 'now' and 'do'."""
     manager = ReleaseManager(packagename, dry_run=dry_run, version=version)
-    
     try:
-        # 0. Version Review
         projection = manager.get_version_projection()
         review_table = Table(title="Version Review", box=box.ROUNDED)
         review_table.add_column("Metric", style="cyan")
         review_table.add_column("Value", style="magenta")
         review_table.add_column("Projected", style="green")
-        
         review_table.add_row("Package", manager.package_name, "")
         review_table.add_row("Organization", manager.organization, "")
         review_table.add_row("Git Tag", projection["git_tag"], f"v{version or projection['projected_pypi']}")
         review_table.add_row("VERSION", projection["github_version"], "")
         review_table.add_row("PyPI", projection["pypi_version"], f"{version or projection['projected_pypi']}")
         review_table.add_row("TestPyPI", projection["testpypi_version"], projection['projected_testpypi'])
-        
         console.print("\n")
         console.print(review_table)
         console.print("\n")
-        
         if not click.confirm("Do you agree with these versions and wish to proceed?"):
             console.print("[yellow]Release cancelled by user during version review.[/yellow]")
             return False
-
-        # 1. Pre-flight
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
             progress.add_task(description="Performing pre-flight checks...", total=None)
             manager.check_dependencies()
             manager.check_git_clean()
-        
-        # Determine version for logging
-        current_v = manager.get_scm_version()
-        final_v = version or current_v
-        
-        # If no version provided and SCM returns a hash, prompt for a semantic version
-        if not version and manager.is_commit_hash(final_v):
-            console.print(f"[yellow]Warning: SCM version is a commit hash ({final_v}).[/yellow]")
-            final_v = click.prompt("Please enter a starting semantic version (e.g., 0.1.0)")
-        
-        log_v = final_v
-        manager.init_logging(log_v)
-        
-        # Changelog
+        final_v = version or projection['projected_pypi']
+        manager.init_logging(final_v)
         changelog = manager.get_changelog()
         console.print(Panel(changelog, title="Suggested Changelog", border_style="blue"))
-        
-        # 2. Baseline
         if click.confirm("\nStep 1: Create baseline git commit?"):
             manager.create_baseline()
         else:
             console.print("[yellow]Skipping baseline commit. Proceed with caution.[/yellow]")
-
-        # 3. TestPyPI Phase (Verification)
         if not skip_testpypi:
-            # Use the pre-validated projected version from the review table
             test_v = version or projection['projected_testpypi']
-            
             console.print(f"\nStep 2: [bold cyan]Verification Phase[/bold cyan] - Tag as {test_v}, build, and upload to TestPyPI?")
             if click.confirm("Proceed?", default=True):
                 try:
-                    # Update VERSION file so the build artifact has the correct version
                     manager.bump_version(test_v)
                     manager.create_tag(test_v)
                     manager.build_package()
                     manager.upload_to_pypi("testpypi")
-                    
                     console.print(f"\n[bold yellow]ACTION REQUIRED:[/bold yellow] Please install version {test_v} from TestPyPI in a clean environment to verify it works.")
                     if click.confirm("Did the TestPyPI installation and verification work?"):
                         manager._log("TestPyPI verification successful.", "INFO")
@@ -909,25 +805,18 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                         if click.confirm("Verification failed. Rollback now?"):
                             manager.rollback()
                             return False
-                except RuntimeError as e:
+                except Exception as e:
                     console.print(f"[bold red]TestPyPI phase failed:[/bold red] {e}")
                     if click.confirm("Would you like to attempt a rollback?"):
                         manager.rollback()
                         return False
-                    sys.exit(1)
             else:
                 console.print("[yellow]Skipping TestPyPI verification phase.[/yellow]")
-
-        # 4. Final PyPI Phase (Production)
         console.print(f"\nStep 3: [bold green]Production Phase[/bold green] - Tag as {final_v}, build, and upload to PyPI?")
         if click.confirm("Proceed?", default=True):
-            # Update VERSION file so the build artifact has the correct version
             manager.bump_version(final_v)
-            # NEW ORDER: Tag -> Build -> Upload
             manager.create_tag(final_v)
             manager.build_package()
-            
-            # Double confirmation for PyPI
             console.print(Panel(
                 f"CRITICAL: You are about to upload version {final_v} to the official PyPI server.\n"
                 "This action cannot be undone. Please ensure all tests have passed.",
@@ -935,13 +824,10 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 border_style="red",
                 box=box.DOUBLE
             ))
-            
             if click.confirm("Are you absolutely sure you want to upload to PyPI? [y/N]", default=False):
                 if click.confirm("LAST CHANCE: Confirm upload to PyPI? [y/N]", default=False):
                     manager.upload_to_pypi("pypi")
                     manager._log("Official PyPI release complete!", "INFO")
-                    
-                    # Post-release: Bump version and set up next dev cycle
                     try:
                         next_v = manager.bump_patch_version(final_v)
                         manager._log(f"Post-release: Preparing next cycle {next_v}...", "INFO")
@@ -956,8 +842,6 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
                 console.print("[red]Upload cancelled.[/red]")
         else:
             console.print("[yellow]Final release cancelled.[/yellow]")
-
-        # Summary
         table = Table(title="Release Summary", box=box.ROUNDED)
         table.add_column("Item", style="cyan")
         table.add_column("Value", style="magenta")
@@ -969,10 +853,8 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         console.print(table)
         console.print("\n")
         return True
-
     except Exception as e:
         console.print(f"\n[bold red]Release failed:[/bold red] {e}")
-        # Only offer rollback if a baseline was actually created
         if not dry_run and manager.state.get("baseline_commit") and click.confirm("Would you like to attempt a rollback?"):
             manager.rollback()
         return False
@@ -983,9 +865,7 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
 @click.option("--version", type=str, help="Specify the target version for the release.")
 @click.option("--skip-testpypi", is_flag=True, help="Skip the TestPyPI validation phase.")
 def release_cmd(packagename, dry_run, version, skip_testpypi):
-    """
-    Execute the release wizard for a specified package.
-    """
+    """Execute the release wizard for a specified package."""
     if not run_release_wizard(packagename, dry_run, version, skip_testpypi):
         sys.exit(1)
 
@@ -1013,7 +893,6 @@ def plan_list():
     if not packages:
         console.print("[yellow]No packages configured for release. Use 'release plan add' to add some.[/yellow]")
         return
-    
     table = Table(title="Release Plan", box=box.ROUNDED)
     table.add_column("Index", style="cyan")
     table.add_column("Package Name", style="magenta")
@@ -1032,8 +911,6 @@ def plan_do(dry_run, version, skip_testpypi):
     if not packages:
         console.print("[red]No packages configured. Use 'release plan add' first.[/red]")
         return
-
-    # Recovery logic
     state = config.load_plan_state()
     if state and state.get("status") != "completed":
         last_pkg = state.get("last_package")
@@ -1044,11 +921,7 @@ def plan_do(dry_run, version, skip_testpypi):
                 console.print(f"[yellow]Resuming release from {last_pkg}...[/yellow]")
             except ValueError:
                 console.print("[red]Last package not found in current plan. Starting from beginning.[/red]")
-
-    # Version Review for all packages
     console.print(Panel(f"Preparing version review for {len(packages)} packages...", style="bold blue"))
-    
-    # Collect projections for all packages first
     all_projections = {}
     for pkg in packages:
         try:
@@ -1058,7 +931,6 @@ def plan_do(dry_run, version, skip_testpypi):
             all_projections[pkg] = proj
         except Exception as e:
             all_projections[pkg] = {"error": str(e)}
-
     review_table = Table(title="Bulk Release Version Review", box=box.ROUNDED)
     review_table.add_column("Package", style="cyan")
     review_table.add_column("Organization", style="magenta")
@@ -1068,13 +940,11 @@ def plan_do(dry_run, version, skip_testpypi):
     review_table.add_column("Projected PyPI", style="green")
     review_table.add_column("Current TestPyPI", style="magenta")
     review_table.add_column("Projected TestPyPI", style="green")
-    
     for pkg in packages:
         proj = all_projections.get(pkg, {})
         if "error" in proj:
             review_table.add_row(pkg, "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]", "[red]Error[/red]")
             continue
-            
         review_table.add_row(
             pkg,
             proj.get("organization", "N/A"),
@@ -1085,23 +955,16 @@ def plan_do(dry_run, version, skip_testpypi):
             proj.get("testpypi_version", "N/A"),
             f"[green]{proj.get('projected_testpypi', 'N/A')}[/green]"
         )
-            
     console.print("\n")
     console.print(review_table)
     console.print("\n")
-    
     if not click.confirm("Do you agree with all projected versions and wish to proceed with the bulk release?"):
         console.print("[yellow]Bulk release cancelled by user during version review.[/yellow]")
         return
-
     console.print(Panel(f"Starting bulk release for {len(packages)} packages...", style="bold blue"))
-    
     for pkg in packages:
         console.print(Panel(f"Processing package: [bold magenta]{pkg}[/bold magenta]", style="cyan"))
-        
-        # Save state before starting this package
         config.save_plan_state(pkg, "in_progress")
-        
         success = run_release_wizard(pkg, dry_run, version, skip_testpypi)
         if not success:
             config.save_plan_state(pkg, "failed")
@@ -1109,7 +972,6 @@ def plan_do(dry_run, version, skip_testpypi):
                 continue
             else:
                 sys.exit(1)
-    
     config.clear_plan_state()
     console.print("\n[bold green]Bulk release process completed![/bold green]\n")
 
@@ -1127,9 +989,7 @@ def plan_now(packagename, dry_run, version, skip_testpypi):
 @click.argument("packagename")
 @click.option("--dry-run", is_flag=True, help="Simulate the rollback process.")
 def rollback_cmd(packagename, dry_run):
-    """
-    Roll back a failed release to the baseline state.
-    """
+    """Roll back a failed release to the baseline state."""
     manager = ReleaseManager(packagename, dry_run=dry_run)
     try:
         manager.rollback()
