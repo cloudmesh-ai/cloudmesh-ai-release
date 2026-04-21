@@ -369,6 +369,19 @@ class ReleaseManager:
         except Exception:
             return "Not found"
 
+    def version_exists_on_testpypi(self, version: str) -> bool:
+        """Checks if a specific version exists on TestPyPI."""
+        url = f"https://test.pypi.org/pypi/{self.package_name}/{version}/json"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                return response.getcode() == 200
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise e
+        except Exception:
+            return False
+
     def get_latest_git_tag(self) -> str:
         """Gets the latest git tag."""
         try:
@@ -414,6 +427,10 @@ class ReleaseManager:
         proj_prod = self.bump_patch_version(max_base)
         # TestPyPI must always have .devN at the end
         proj_dev = f"{proj_prod}.dev1"
+        
+        # Ensure the projected TestPyPI version doesn't already exist
+        while self.version_exists_on_testpypi(proj_dev):
+            proj_dev = self.increment_dev_version(proj_dev)
         
         return {
             "git_tag": latest_tag,
