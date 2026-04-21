@@ -406,14 +406,15 @@ class ReleaseManager:
                 parsed_versions.append((parsed, v, source))
         
         if not parsed_versions:
-            max_base = "0.1.0"
+            proj_prod = "0.1.0"
         else:
             parsed_versions.sort(key=lambda x: x[0])
             _, max_v_str, _ = parsed_versions[-1]
-            max_base = max_v_str[1:] if max_v_str.startswith("v") else max_v_str
-            max_base = max_base.split(".dev")[0]
-
-        proj_prod = self.bump_patch_version(max_base)
+            clean_max = max_v_str[1:] if max_v_str.startswith("v") else max_v_str
+            if ".dev" in clean_max:
+                proj_prod = clean_max.split(".dev")[0]
+            else:
+                proj_prod = self.bump_patch_version(clean_max)
         proj_dev = f"{proj_prod}.dev1"
         
         while self.version_exists_on_testpypi(proj_dev) or self.check_tag_exists(proj_dev):
@@ -766,7 +767,7 @@ def run_release_wizard(packagename, dry_run, version, skip_testpypi):
         review_table.add_column("Projected", style="green")
         review_table.add_row("Package", manager.package_name, "")
         review_table.add_row("Organization", manager.organization, "")
-        review_table.add_row("Git Tag", projection["git_tag"], f"v{version or projection['projected_pypi']}")
+        review_table.add_row("Git Tag", projection["git_tag"], version or projection['projected_pypi'])
         review_table.add_row("VERSION", projection["github_version"], "")
         review_table.add_row("PyPI", projection["pypi_version"], f"{version or projection['projected_pypi']}")
         review_table.add_row("TestPyPI", projection["testpypi_version"], projection['projected_testpypi'])
