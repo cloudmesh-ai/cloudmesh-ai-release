@@ -783,7 +783,8 @@ def check_cmd(packagename):
 @release_group.command(name="version")
 @click.argument("action", required=False)
 @click.argument("packagename")
-def version_cmd(action, packagename):
+@click.argument("version", required=False)
+def version_cmd(action, packagename, version):
     """Print current version status or increment version."""
     manager = ReleaseManager(packagename)
     try:
@@ -796,6 +797,12 @@ def version_cmd(action, packagename):
             next_v = manager.increment_prod_version()
             manager.bump_version(next_v)
             console.print(f"[green]Prod version updated: {current_v} -> {next_v}[/green]")
+        elif action == "set":
+            if not version:
+                console.print("[red]Error: 'set' action requires a version value. Use 'release version set <packagename> <version>'[/red]")
+                sys.exit(1)
+            manager.bump_version(version)
+            console.print(f"[green]Version explicitly set: {current_v} -> {version}[/green]")
         else:
             next_prod = manager.increment_prod_version()
             next_dev = manager.increment_dev_version()

@@ -1,3 +1,5 @@
+.DS_Store
+*.log
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -46,4 +48,4 @@ ENV/
 
 # Cloudmesh AI Release specific
 .release_state.json
-release_*.log
+release_*.log.DS_Store
