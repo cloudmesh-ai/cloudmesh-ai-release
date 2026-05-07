@@ -27,7 +27,6 @@ All notable changes to `cloudmesh-ai-release` will be documented in this file.
 ## [0.1.4] - 2026-04-19
 
 ### Added
-- Implemented rollback capabilities to restore the local environment to the baseline state after a failed release.
 - Added automatic cleanup of the `dist` directory before building to prevent artifact confusion.
 
 ### Fixed

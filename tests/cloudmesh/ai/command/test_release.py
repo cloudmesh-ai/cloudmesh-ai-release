@@ -171,9 +171,3 @@ class TestReleaseCLI:
         manager.create_baseline()
         assert manager.state["baseline_commit"] == "abc1234"
 
-    def test_rollback_cmd(self, tmp_release_dir, mock_pyproject):
-        runner = CliRunner()
-        with patch("cloudmesh.ai.command.release.ReleaseManager.rollback"):
-            result = runner.invoke(release_group, ["rollback", str(tmp_release_dir)])
-            assert result.exit_code == 0
-            assert "Rollback completed successfully." in result.output

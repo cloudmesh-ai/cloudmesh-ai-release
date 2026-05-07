@@ -2,7 +2,33 @@
 
 Cloudmesh AI Release is an automation extension for the `cmc` (Cloudmesh Commands) tool. It transforms the error-prone process of releasing Python packages to PyPI into a structured, wizard-driven workflow.
 
-By enforcing pre-flight checks, managing state, and providing a "safety net" via baseline commits and rollback capabilities, it ensures that every release is consistent, documented, and reversible.
+By enforcing pre-flight checks, managing state, and providing a "safety net" via baseline commits, it ensures that every release is consistent, documented, and reversible.
+
+## Installation
+
+### Recommended: Using pipx
+For the best experience with CLI tools, use `pipx` to install `cloudmesh-ai-release` in an isolated environment.
+
+``` bash
+pipx install cloudmesh-ai-release
+```
+
+To install from a local directory:
+``` bash
+pipx install .
+```
+
+### Using pip
+If you prefer a standard installation in your current environment:
+
+``` bash
+pip install cloudmesh-ai-release
+```
+
+To install from a local directory:
+``` bash
+pip install .
+```
 
 ## Quickstart
 
@@ -68,7 +94,6 @@ Usage:
   cmc release testpypi [options] <package_path>
   cmc release pypi [options] <package_path>
   cmc release check <package_path>
-  cmc release rollback [options] <package_path>
   cmc release version [action] <package_path>
   cmc release clean-tags [options]
   cmc release plan add <package_name>
@@ -109,10 +134,6 @@ Manage the `VERSION` file directly.
 Interactively clean up Git tags.
 - **`--all`**: Show all tags. By default, it only shows `.dev` tags.
 - Use this to remove stale development tags from both local and remote repositories.
-
-#### `rollback`
-Emergency recovery tool to restore the local environment to the pre-release state.
-- **`<packagename>`**: The directory name of the package to roll back.
 
 ------------------------------------------------------------------------
 
@@ -199,15 +220,6 @@ Captures the current `HEAD` commit and creates a "Baseline" commit to ensure a 1
 ------------------------------------------------------------------------
 
 ## Safety Mechanisms
-
-### State Tracking (`.release_state.json`)
-Maintains a hidden state file to track progress and enable the `rollback` command.
-
-### Rollback Logic
-The `rollback` command:
-1. Deletes the local and remote git tags.
-2. Performs a `git reset --hard` to the baseline commit.
-3. Cleans up the `dist/` directory and state file.
 
 ### Audit Logging
 Every release creates a `release_<version>.log` file containing timestamps, executed commands, and full `STDOUT`/`STDERR`.
