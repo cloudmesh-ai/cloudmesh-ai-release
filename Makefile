@@ -12,7 +12,7 @@ GIT          := git
 PYENVVERSION := $(shell pyenv version-name)
 
 .PHONY: help install clean build upload test-upload test-install reinstall \
-        check version patch tag release test test-cov setup-test uninstall-all \
+        check version patch tag release test-html test-cov setup-test uninstall-all \
         tmp-setup
 
 help:
@@ -54,13 +54,17 @@ requirements:
 	pip-compile --output-file=requirements.txt pyproject.toml
 
 test:
-	PYTHONPATH=src pytest -v tests/
+	PYTHONPATH=src $(PYTHON) -m pytest -v tests/
+
+test-html:
+	PYTHONPATH=src $(PYTHON) -m pytest -v --html=.report.html tests/
+	open .report.html
 
 test-cov:
 	PYTHONPATH=src pytest --cov=cloudmesh.ai.command.release --cov-report=term-missing tests/
 
 setup-test:
-	$(PIP) install pytest pytest-mock pytest-cov
+	$(PIP) install pytest pytest-mock pytest-cov pytest-html
 
 # --- BUILD AND VALIDATE ---
 
