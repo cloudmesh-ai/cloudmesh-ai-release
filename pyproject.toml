@@ -7,6 +7,16 @@ name = "cloudmesh-ai-release"
 dynamic = ["version"]
 description = "Release automation tool for Cloudmesh AI packages"
 readme = "README.md"
+license = "Apache-2.0"
+urls = { "Homepage" = "https://github.com/cloudmesh-ai/cloudmesh-ai-release" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: System Administrators",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+]
 requires-python = ">=3.9"
 dependencies = [
     "click",
