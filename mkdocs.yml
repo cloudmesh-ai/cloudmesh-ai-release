@@ -5,39 +5,37 @@ theme:
   name: material
   logo: assets/logo-white.png
   favicon: assets/favicon.ico
-
 extra_css:
-  - css/custom.css
-
+- css/custom.css
 nav:
-  - Home: README.md
-  - Project:
-      - Changelog: CHANGELOG.md
-      - Update: update.md
-  - Documentation:
-      - User Guide: user.md
-      - IO: io.md
-      - Logging: logging.md
-      - Stopwatch: stopwatch.md
-      - System: sys.md
-      - Telemetry: telemetry.md
-      - Time: time.md
-      - Aggregation: aggregation.md
-  - API Reference: api.md
-
+- Home: README.md
+- Project:
+  - Changelog: CHANGELOG.md
+  - Update: update.md
+- Documentation:
+  - User Guide: user.md
+  - IO: io.md
+  - Logging: logging.md
+  - Stopwatch: stopwatch.md
+  - System: sys.md
+  - Telemetry: telemetry.md
+  - Time: time.md
+  - Aggregation: aggregation.md
+- API Reference: api.md
 plugins:
-  - search
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [src]
-          options:
-            docstring_style: google
-            show_submodules: true
-            members: true
-            docstring_section_style: table
-            show_source: true
-            group_by_category: true
-            show_category_heading: true
-            separate_signature: true
-            show_root_full_path: true
+- search
+- mkdocstrings:
+    handlers:
+      python:
+        paths:
+        - src
+        options:
+          docstring_style: google
+          show_submodules: true
+          members: true
+          docstring_section_style: table
+          show_source: true
+          group_by_category: true
+          show_category_heading: true
+          separate_signature: true
+          show_root_full_path: true
