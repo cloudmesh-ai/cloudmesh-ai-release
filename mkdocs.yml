@@ -8,7 +8,7 @@ theme:
 extra_css:
 - css/custom.css
 nav:
-- Home: README.md
+- Home: index.md
 - Project:
   - Changelog: CHANGELOG.md
   - Update: update.md
