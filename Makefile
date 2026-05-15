@@ -127,3 +127,6 @@ clean:
 reinstall: uninstall-all clean
 	@echo "Performing fresh install..."
 	$(PIP) install -e .
+publish:
+t@echo "Deploying MkDocs site to GitHub Pages..."
+tmkdocs gh-deploy --clean
