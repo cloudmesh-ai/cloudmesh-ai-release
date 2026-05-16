@@ -1,14 +1,11 @@
-.DS_Store
-*.log
-# Byte-compiled / optimized / DLL files
+# MkDocs build output
+site/
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -22,30 +19,21 @@ parts/
 sdist/
 var/
 wheels/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Pytest / Coverage
+# Testing
 .pytest_cache/
 .coverage
-htmlcov/
-.coverage
+.report.html
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Environment variables / Secrets
-.env
-.venv
-env/
-venv/
-ENV/
-
-# Cloudmesh AI Release specific
-.release_state.json
-release_*.log.DS_Store
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
