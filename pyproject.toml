@@ -24,6 +24,7 @@ dependencies = [
     "twine",
     "build",
     "questionary",
+    "cloudmesh-ai-theme",
 ]
 
 [project.entry-points."cloudmesh.ai.command"]
