@@ -1,10 +1,4 @@
-site_name: Cloudmesh AI Release
 docs_dir: docs
-use_directory_urls: false
-theme:
-  name: material
-  logo: assets/logo-white.png
-  favicon: assets/favicon.ico
 extra_css:
 - css/custom.css
 nav:
@@ -14,20 +8,27 @@ nav:
   - GitHub: https://github.com/cloudmesh-ai/cloudmesh-ai-release
   - Issues: https://github.com/cloudmesh-ai/cloudmesh-ai-release/issues
 - API Reference: api.md
+- README: README.md
 plugins:
 - search
 - mkdocstrings:
     handlers:
       python:
+        options:
+          docstring_section_style: table
+          docstring_style: google
+          group_by_category: true
+          members: true
+          separate_signature: true
+          show_category_heading: true
+          show_root_full_path: true
+          show_source: true
+          show_submodules: true
         paths:
         - src
-        options:
-          docstring_style: google
-          show_submodules: true
-          members: true
-          docstring_section_style: table
-          show_source: true
-          group_by_category: true
-          show_category_heading: true
-          separate_signature: true
-          show_root_full_path: true
+site_name: Cloudmesh AI Release
+theme:
+  favicon: assets/favicon.ico
+  logo: assets/logo-white.png
+  name: material
+use_directory_urls: false
