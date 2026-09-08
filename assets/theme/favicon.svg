@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="cloudBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e90ff"/>
+      <stop offset="100%" stop-color="#006dff"/>
+    </linearGradient>
+
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- Transparent Background -->
+  <rect width="512" height="512" fill="transparent"/>
+
+  <!-- Cloud -->
+  <g filter="url(#shadow)">
+    <path
+      d="
+        M95 400
+        H417
+        C470 400 502 362 502 307
+        C502 258 468 223 423 223
+        H405
+        C390 138 326 92 255 92
+        C182 92 124 140 105 205
+        C53 210 18 248 18 305
+        C18 362 48 400 95 400
+        Z
+      "
+      fill="url(#cloudBlue)"
+    />
+  </g>
+
+  <!-- Perfectly Centered AI -->
+  <text
+    x="230"
+    y="285"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="245"
+    font-weight="900"
+    fill="#ffffff"
+    letter-spacing="-18">
+    AI
+  </text>
+</svg>
