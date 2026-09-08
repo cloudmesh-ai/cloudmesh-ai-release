@@ -9,24 +9,24 @@ By enforcing pre-flight checks, managing state, and providing a "safety net" via
 ### Recommended: Using pipx
 For the best experience with CLI tools, use `pipx` to install `cloudmesh-ai-release` in an isolated environment.
 
-``` bash
+```bash
 pipx install cloudmesh-ai-release
 ```
 
 To install from a local directory:
-``` bash
+```bash
 pipx install .
 ```
 
 ### Using pip
 If you prefer a standard installation in your current environment:
 
-``` bash
+```bash
 pip install cloudmesh-ai-release
 ```
 
 To install from a local directory:
-``` bash
+```bash
 pip install .
 ```
 
@@ -40,14 +40,14 @@ Run the interactive wizard that guides you through all steps.
 
 **From a parent directory:**
 
-``` bash
+```bash
 # Specify the path to the package root
 cmc release now cloudmesh-ai-cmc
 ```
 
 **From within the package directory:**
 
-``` bash
+```bash
 # Use '.' to indicate the current directory
 cmc release now .
 ```
@@ -58,7 +58,7 @@ The tool will automatically detect the actual package name from the `pyproject.t
 
 Manage and execute releases for multiple packages in a single session.
 
-``` bash
+```bash
 # Add packages to the release plan
 cmc release plan add cloudmesh-ai-common
 cmc release plan add cloudmesh-ai-cmc
@@ -74,7 +74,7 @@ cmc release plan do
 
 Execute each phase manually:
 
-``` bash
+```bash
 cmc release validate cloudmesh-ai-cmc
 cmc release baseline cloudmesh-ai-cmc
 cmc release testpypi cloudmesh-ai-cmc
@@ -230,7 +230,7 @@ Every release creates a `release_<version>.log` file containing timestamps, exec
 
 ### Authentication
 Relies on `twine`. Configure credentials via environment variables:
-``` bash
+```bash
 export TWINE_USERNAME=__token__
 export TWINE_PASSWORD=pypi-your-api-token-here
 ```
@@ -246,7 +246,7 @@ export TWINE_PASSWORD=pypi-your-api-token-here
 ## Development & Contribution
 
 ### Local Installation
-``` bash
+```bash
 cd cloudmesh-ai-release
 make install
 ```
